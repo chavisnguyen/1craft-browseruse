@@ -1,24 +1,34 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install browseruse Go MCP Binary into AGY, OpenCode, Claude Code, Kiro, and Claude Desktop
+# Install browseruse MCP Server into AGY, OpenCode, Claude Code, Kiro, and Claude Desktop
+# Usage:
+#   ./install.sh sse    (Recommended for multiple agents: connects to http://localhost:3025/sse)
+#   ./install.sh stdio  (Standalone mode: spawns binary on demand)
+
+MODE="${1:-sse}"
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$TOOL_DIR/bin/browseruse"
+SSE_URL="http://localhost:3025/sse"
 
 if [ ! -f "$BIN_PATH" ]; then
     echo "⚙️ Building binary first..."
     go build -o "$BIN_PATH" "$TOOL_DIR/main.go"
 fi
 
-echo "🔧 Configuring browseruse (Golang) MCP Server..."
-echo "   Binary: $BIN_PATH"
+echo "🔧 Configuring browseruse MCP Server in [$MODE] mode..."
+if [ "$MODE" = "sse" ]; then
+    echo "   SSE URL: $SSE_URL (Run 'make daemon' to start server)"
+else
+    echo "   Binary: $BIN_PATH (stdio mode)"
+fi
 echo ""
 
 # --- 1. AGY: ~/.gemini/config/mcp_config.json ---
 AGY_CONFIG="$HOME/.gemini/config/mcp_config.json"
 echo "📝 Updating AGY config: $AGY_CONFIG"
 
-python3 << 'PYEOF'
+python3 - << PYEOF
 import json, os
 
 path = os.path.expanduser("~/.gemini/config/mcp_config.json")
@@ -30,9 +40,15 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
-data["mcpServers"]["browseruse"] = {
-    "command": "/Users/chavis/Documents/personal/tool/browseruse/bin/browseruse"
-}
+if "$MODE" == "sse":
+    data["mcpServers"]["browseruse"] = {
+        "disabled": False,
+        "serverUrl": "$SSE_URL"
+    }
+else:
+    data["mcpServers"]["browseruse"] = {
+        "command": "$BIN_PATH"
+    }
 
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
@@ -44,7 +60,7 @@ PYEOF
 # --- 2. OpenCode: ~/.config/opencode/opencode.json(c) ---
 echo "📝 Updating OpenCode config..."
 
-python3 << 'PYEOF'
+python3 - << PYEOF
 import json, os, re
 
 base = os.path.expanduser("~/.config/opencode")
@@ -66,10 +82,16 @@ else:
     data = {}
 
 data.setdefault("mcp", {}).setdefault("servers", {})
-data["mcp"]["servers"]["browseruse"] = {
-    "type": "stdio",
-    "command": "/Users/chavis/Documents/personal/tool/browseruse/bin/browseruse"
-}
+if "$MODE" == "sse":
+    data["mcp"]["servers"]["browseruse"] = {
+        "type": "remote",
+        "url": "$SSE_URL"
+    }
+else:
+    data["mcp"]["servers"]["browseruse"] = {
+        "type": "stdio",
+        "command": "$BIN_PATH"
+    }
 
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
@@ -82,7 +104,7 @@ PYEOF
 CC_CONFIG="$HOME/.claude.json"
 echo "📝 Updating Claude Code config: $CC_CONFIG"
 
-python3 << 'PYEOF'
+python3 - << PYEOF
 import json, os
 
 path = os.path.expanduser("~/.claude.json")
@@ -93,9 +115,15 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
-data["mcpServers"]["browseruse"] = {
-    "command": "/Users/chavis/Documents/personal/tool/browseruse/bin/browseruse"
-}
+if "$MODE" == "sse":
+    data["mcpServers"]["browseruse"] = {
+        "type": "http",
+        "url": "$SSE_URL"
+    }
+else:
+    data["mcpServers"]["browseruse"] = {
+        "command": "$BIN_PATH"
+    }
 
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
@@ -108,7 +136,7 @@ PYEOF
 KIRO_CONFIG="$HOME/.kiro/settings/mcp.json"
 echo "📝 Updating Kiro config: $KIRO_CONFIG"
 
-python3 << 'PYEOF'
+python3 - << PYEOF
 import json, os
 
 path = os.path.expanduser("~/.kiro/settings/mcp.json")
@@ -121,10 +149,16 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
-data["mcpServers"]["browseruse"] = {
-    "command": "/Users/chavis/Documents/personal/tool/browseruse/bin/browseruse",
-    "disabled": False
-}
+if "$MODE" == "sse":
+    data["mcpServers"]["browseruse"] = {
+        "url": "$SSE_URL",
+        "disabled": False
+    }
+else:
+    data["mcpServers"]["browseruse"] = {
+        "command": "$BIN_PATH",
+        "disabled": False
+    }
 
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
@@ -137,7 +171,7 @@ PYEOF
 CD_CONFIG="$HOME/Library/Application Support/Claude/claude_desktop_config.json"
 if [ -d "$HOME/Library/Application Support/Claude" ]; then
     echo "📝 Updating Claude Desktop config: $CD_CONFIG"
-    python3 << 'PYEOF'
+    python3 - << PYEOF
 import json, os
 
 path = os.path.expanduser("~/Library/Application Support/Claude/claude_desktop_config.json")
@@ -149,7 +183,7 @@ else:
 
 data.setdefault("mcpServers", {})
 data["mcpServers"]["browseruse"] = {
-    "command": "/Users/chavis/Documents/personal/tool/browseruse/bin/browseruse"
+    "command": "$BIN_PATH"
 }
 
 with open(path, "w") as f:
@@ -161,4 +195,7 @@ PYEOF
 fi
 
 echo ""
-echo "🎉 Done! browseruse (Golang binary) configured across all AI tools."
+echo "🎉 Done! browseruse configured in [$MODE] mode across your AI tools."
+if [ "$MODE" = "sse" ]; then
+    echo "💡 Note: To start the background server, run: make daemon"
+fi

@@ -1,48 +1,61 @@
-# browseruse MCP Server (Golang Engine)
+# browseruse MCP Server (Golang Multi-Agent Engine)
 
-MCP Server điều khiển trình duyệt trực tiếp viết bằng **Golang** dành cho tất cả AI Agent (**AGY, Claude Code, Cursor, Kiro, OpenCode, Claude Desktop**).
+MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ chạy nền **SSE Server (cổng 3025)** hoặc **stdio** cho phép **nhiều Agent dùng song song cùng lúc**.
 
-## ⚡ Ưu điểm vượt trội của bản Golang
+## 🚀 Tính năng nổi bật
 
-1. **Khởi động tức thì (< 0.01 giây):** File nhị phân tĩnh (Static Binary), không tốn thời gian nạp Python runtime.
-2. **Siêu nhẹ RAM (~10MB):** Binary Go chỉ tiêu thụ khoảng 10MB RAM, nhẹ hơn nhiều so với Python.
-3. **Độc lập, không cần cài Python/uv:** Biên dịch thành 1 file duy nhất `bin/browseruse`.
-4. **Hỗ trợ Makefile chuẩn chỉnh:** Quản lý toàn bộ vòng đời ứng dụng chỉ bằng các lệnh `make`.
-5. **Không cần API Key:** Dùng trực tiếp bộ não của Agent bạn đang chat, MCP chỉ là "tay chân" thực thi.
+1. **Hỗ trợ đa Agent đồng thời (Multi-Agent Concurrency):**
+   * Chạy nền 1 tiến trình Go duy nhất (`make daemon`).
+   * Quản lý Tab Pool: Nhiều Agent kết nối vào cùng lúc sẽ tự động dùng các Tab độc lập (`tab-1`, `tab-2`...), không bao giờ tranh chấp hay đè thao tác của nhau.
+2. **Siêu nhẹ RAM (~12MB):**
+   * Binary Go tiêu thụ chỉ ~12MB RAM khi chạy daemon phục vụ cho tất cả các Agent.
+3. **Cắm vào Chrome đang mở (Port 9222):**
+   * Toàn bộ các Tab của các Agent đều mở trong cùng một cửa sổ Google Chrome của bạn, dùng chung mọi tài khoản, cookie đã đăng nhập và 0 MB RAM dư thừa.
+4. **Không cần API Key:**
+   * Dùng trực tiếp trí tuệ của Agent (Claude, Gemini, GPT) để phân tích giao diện và ra lệnh.
 
 ---
 
-## 🚀 Thao tác nhanh với Makefile
+## 🛠 Lệnh Makefile nhanh
 
 | Lệnh | Ý nghĩa |
 | :--- | :--- |
-| `make build` | Biên dịch file nhị phân Go vào `bin/browseruse` |
-| `make install` | Biên dịch và tự động cắm MCP vào **AGY, Claude Code, OpenCode, Kiro, Claude Desktop** |
-| `make chrome` | Bật Google Chrome với cổng debug 9222 (dùng chung cookie/login, 0 MB RAM thừa) |
-| `make test` | Chạy test tự động |
-| `make clean` | Dọn dẹp thư mục `bin/` và các file tạm |
+| `make daemon` | Bật SSE Server ngầm tại `http://localhost:3025/sse` |
+| `make stop` | Tắt SSE Server ngầm |
+| `make restart` | Khởi động lại Server |
+| `make status` | Kiểm tra trạng thái Server và kết nối Chrome cổng 9222 |
+| `make install` | Cài đặt MCP chế độ SSE (`http://localhost:3025/sse`) vào AGY, Claude Code, OpenCode, Kiro, Claude Desktop |
+| `make install-stdio` | Cài đặt MCP chế độ stdio (chạy binary trực tiếp khi cần) |
+| `make chrome` | Bật Google Chrome với cổng remote debugging 9222 |
+| `make test` | Chạy bộ kiểm thử tự động đa Tab |
+| `make clean` | Dọn dẹp binary, file log, pid |
 
 ---
 
-## 🛠 Danh sách Tool MCP cung cấp cho Agent
+## 🌐 Các Tool cung cấp cho Agent
 
-* `browser_navigate(url)`: Mở trang web và tự động đọc cấu trúc UI (danh sách nút bấm, ô input, link).
-* `browser_snapshot()`: Đọc lại toàn bộ trạng thái màn hình hiện tại.
-* `browser_click(selector)`: Bấm vào nút, link (hỗ trợ text như `Đăng nhập`, CSS selector, aria-label).
-* `browser_type(selector, text, press_enter)`: Điền thông tin vào ô input và nhấn Enter nếu cần.
-* `browser_press_key(key)`: Bấm phím (Enter, Tab, Escape, Down...).
-* `browser_screenshot(filename)`: Chụp ảnh màn hình lưu file PNG.
-* `browser_evaluate(script)`: Chạy code JavaScript trên trang web.
-* `get_browser_status()`: Kiểm tra trạng thái cổng 9222 và Chrome.
-* `browser_close()`: Đóng tab/trình duyệt giải phóng tài nguyên.
+* `browser_new_tab(url)`: Mở một Tab mới độc lập (trả về `tab_id`, ví dụ `tab-1`).
+* `browser_list_tabs()`: Liệt kê tất cả các tab đang mở, tab nào đang active.
+* `browser_close_tab(tab_id)`: Đóng tab cụ thể khi làm xong.
+* `browser_navigate(url, tab_id)`: Mở link trên tab chỉ định (hoặc tab active).
+* `browser_snapshot(tab_id)`: Đọc cấu trúc UI, các nút bấm, ô input của tab.
+* `browser_click(selector, tab_id)`: Bấm vào nút, link trên tab.
+* `browser_type(selector, text, press_enter, tab_id)`: Điền nội dung vào ô input.
+* `browser_press_key(key, tab_id)`: Bấm phím bàn phím trên tab.
+* `browser_screenshot(filename, tab_id)`: Chụp ảnh màn hình của tab lưu file PNG.
+* `browser_evaluate(script, tab_id)`: Thực thi code JavaScript trên tab.
+* `get_browser_status()`: Xem trạng thái hệ thống và danh sách tab.
+* `browser_close()`: Đóng toàn bộ các tab và tài nguyên.
 
 ---
 
-## 🌐 Cách dùng hàng ngày
+## 💡 Hướng dẫn sử dụng hàng ngày
 
-1. **Mở Chrome chung:**
-   ```bash
-   make chrome
-   ```
-2. **Chat với bất kỳ AI nào (Claude Code, AGY, Cursor...):**
-   > *"Dùng browseruse vào localhost:5174, đăng nhập bằng tài khoản test rồi kiểm tra bảng học viên."*
+```bash
+# 1. Bật Chrome của bạn (để giữ login)
+make chrome
+
+# 2. Bật daemon chạy nền (cho mọi Agent cắm vào)
+make daemon
+```
+Sau đó bạn có thể mở đồng thời **Claude Code**, **AGY**, hay **Cursor** và ra lệnh duyệt web mà không sợ bị đè thao tác!

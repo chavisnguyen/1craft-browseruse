@@ -10,3 +10,5 @@ wheels/
 .venv
 .env
 bin/
+daemon.pid
+daemon.log
