@@ -25,12 +25,12 @@ daemon: build
 	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
 		echo "⚠️ Daemon already running (PID: $$(cat $(PID_FILE))) on port $(PORT)"; \
 	else \
-		echo "🚀 Starting SSE Daemon on http://localhost:$(PORT)/sse ..."; \
+		echo "🚀 Starting HTTP/SSE Daemon on http://localhost:$(PORT)/mcp ..."; \
 		nohup $(BIN_PATH) -sse -port $(PORT) > $(LOG_FILE) 2>&1 & echo $$! > $(PID_FILE); \
 		sleep 1; \
 		if kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
 			echo "✅ Daemon started successfully (PID: $$(cat $(PID_FILE)))"; \
-			echo "   Endpoint: http://localhost:$(PORT)/sse"; \
+			echo "   Endpoint: http://localhost:$(PORT)/mcp"; \
 		else \
 			echo "❌ Failed to start daemon. Check $(LOG_FILE)"; \
 			cat $(LOG_FILE); \
@@ -56,7 +56,7 @@ restart: stop daemon
 status:
 	@echo "--- MCP Server Status ---"
 	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
-		echo "🟢 Daemon is RUNNING (PID: $$(cat $(PID_FILE))) on http://localhost:$(PORT)/sse"; \
+		echo "🟢 Daemon is RUNNING (PID: $$(cat $(PID_FILE))) on http://localhost:$(PORT)/mcp"; \
 	else \
 		echo "🔴 Daemon is NOT running (Run 'make daemon' to start)"; \
 	fi
