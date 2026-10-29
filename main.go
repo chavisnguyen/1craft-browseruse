@@ -631,11 +631,21 @@ func main() {
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", streamableServer)
 		mux.Handle("/sse", streamableServer)
-		mux.Handle("/", streamableServer)
+
+		// Explicitly return 404 for OAuth checks so client immediately knows no auth is needed
+		mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+
+		// Logging wrapper to trace all incoming requests from agents
+		loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Printf("👉 [%s] %s (from %s)\n", r.Method, r.URL.Path, r.RemoteAddr)
+			mux.ServeHTTP(w, r)
+		})
 
 		httpServer := &http.Server{
 			Addr:    addr,
-			Handler: mux,
+			Handler: loggingHandler,
 		}
 
 		fmt.Printf("🚀 Starting browseruse MCP Server (HTTP/SSE Daemon) on http://localhost:%s/mcp\n", *port)
