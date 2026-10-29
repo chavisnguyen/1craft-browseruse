@@ -624,23 +624,30 @@ func main() {
 
 	if *sseMode {
 		addr := ":" + *port
-		sseServer := server.NewSSEServer(s,
-			server.WithBaseURL(fmt.Sprintf("http://localhost:%s", *port)),
-			server.WithSSEEndpoint("/sse"),
-			server.WithMessageEndpoint("/message"),
-			server.WithSSECORS(),
+		streamableServer := server.NewStreamableHTTPServer(s,
+			server.WithStreamableHTTPCORS(),
 		)
 
-		fmt.Printf("🚀 Starting browseruse MCP Server (SSE Daemon) on http://localhost:%s/sse\n", *port)
-		fmt.Printf("   Compatible SSE URL: http://localhost:%s/sse\n", *port)
+		mux := http.NewServeMux()
+		mux.Handle("/mcp", streamableServer)
+		mux.Handle("/sse", streamableServer)
+		mux.Handle("/", streamableServer)
+
+		httpServer := &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		}
+
+		fmt.Printf("🚀 Starting browseruse MCP Server (HTTP/SSE Daemon) on http://localhost:%s/mcp\n", *port)
+		fmt.Printf("   Endpoints supported: /mcp, /sse, /\n")
 
 		// Graceful shutdown handling
 		stopChan := make(chan os.Signal, 1)
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
 		go func() {
-			if err := sseServer.Start(addr); err != nil && err != http.ErrServerClosed {
-				fmt.Fprintf(os.Stderr, "SSE Server error: %v\n", err)
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "HTTP Server error: %v\n", err)
 				os.Exit(1)
 			}
 		}()
@@ -649,7 +656,7 @@ func main() {
 		fmt.Println("\n🛑 Shutting down browseruse MCP Server...")
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_ = sseServer.Shutdown(ctx)
+		_ = httpServer.Shutdown(ctx)
 		mgr.CloseAll()
 		fmt.Println("👋 Goodbye!")
 	} else {

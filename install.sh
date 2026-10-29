@@ -9,7 +9,7 @@ set -euo pipefail
 MODE="${1:-sse}"
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$TOOL_DIR/bin/browseruse"
-SSE_URL="http://localhost:3025/sse"
+SSE_URL="http://localhost:3025/mcp"
 
 if [ ! -f "$BIN_PATH" ]; then
     echo "⚙️ Building binary first..."
