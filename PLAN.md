@@ -38,7 +38,11 @@ Quy ước đang có, phải giữ:
 
 ### 1.3 Vấn đề bảo mật đã phát hiện, phải sửa ở Phase 0
 
-`main()` đang bind `addr := ":" + *port`, tức **lắng nghe mọi interface mạng**, không có xác thực. Ai cùng mạng LAN đều có thể gọi `browser_evaluate` điều khiển Chrome đang đăng nhập của chủ máy. Phase 0 phải đổi thành bind `127.0.0.1` mặc định (có cờ `-host` để ghi đè).
+`main()` đang bind `addr := ":" + *port`, tức **lắng nghe mọi interface mạng**, không có xác thực. Ai cùng mạng LAN đều có thể gọi `browser_evaluate` điều khiển Chrome đang đăng nhập của chủ máy. Phase 0 phải sửa:
+
+1. Chỉ bind loopback. **Lưu ý IPv4/IPv6:** `install.sh` cấu hình client bằng `http://localhost:3025/mcp`, mà `localhost` có thể phân giải ra `::1` trước `127.0.0.1`. Nếu chỉ bind `127.0.0.1` thì một số client sẽ hỏng. Vì vậy phải **mở hai listener**: `127.0.0.1:PORT` và `[::1]:PORT` (bỏ qua lỗi nếu máy không có IPv6), cùng phục vụ một `http.Server` qua `Serve(listener)`. Cờ `-host` (mặc định rỗng = hai loopback ở trên) cho phép ghi đè bằng một địa chỉ cụ thể.
+2. Thư viện `mcp-go v1.4.0` (đã kiểm tra trong `streamable_http.go`) **đã** từ chối `Host` lạ khi kết nối đến từ loopback (chống DNS rebinding) và **không** phát header CORS khi không cấu hình origin. Dòng `server.WithStreamableHTTPCORS()` hiện tại không bật origin nào nên vô hại, nhưng nên giữ nguyên, không thêm `WithCORSAllowedOrigins`.
+3. Thêm lớp phòng thủ bổ sung cho `/mcp` và `/sse`: nếu request có header `Origin` không rỗng thì trả 403, trừ khi origin nằm trong biến môi trường `BROWSERUSE_ALLOWED_ORIGINS` (danh sách cách nhau dấu phẩy). Client CLI (Claude Code, AGY...) không gửi `Origin`, nên không bị ảnh hưởng. Mục đích: một trang web trong trình duyệt không gọi được MCP.
 
 ### 1.4 Quy ước làm việc
 
@@ -114,7 +118,7 @@ Một kết nối WebSocket cho mỗi profile, JSON văn bản, mỗi khung là 
 Extension mở `ws://127.0.0.1:3025/ext` (địa chỉ cấu hình được trong options). Khung đầu tiên extension gửi:
 
 ```json
-{"type":"hello","token":"<token>","profile":"work","email":"a@b.com","instanceId":"<uuid lưu trong storage.local>","version":"0.1.0"}
+{"type":"hello","protocol":1,"token":"<token>","profile":"work","email":"a@b.com","instanceId":"<uuid lưu trong storage.local>","version":"0.1.0"}
 ```
 
 Daemon đáp:
@@ -126,11 +130,12 @@ Daemon đáp:
 hoặc lỗi rồi đóng kết nối:
 
 ```json
-{"type":"hello_error","code":"bad_token | label_in_use | bad_label","message":"..."}
+{"type":"hello_error","code":"bad_token | label_in_use | bad_label | bad_protocol","message":"..."}
 ```
 
 - `profile` (nhãn) khớp regex `^[a-z0-9][a-z0-9_-]{0,31}$`. Sai -> `bad_label`.
 - Hai kết nối cùng nhãn: nếu `instanceId` giống nhau thì **thay kết nối cũ** (extension tự kết nối lại), nếu khác thì từ chối `label_in_use`.
+- `protocol` là số nguyên phiên bản giao thức, hiện là `1`. Daemon từ chối khác phiên bản bằng `bad_protocol` (thông điệp nói rõ cần cập nhật daemon hay extension). `version` chỉ để hiển thị.
 - `email` chỉ để hiển thị (có thể rỗng), không dùng để định danh.
 
 ### 5.2 Lệnh (daemon -> extension) và đáp (extension -> daemon)
@@ -141,7 +146,9 @@ hoặc lỗi rồi đóng kết nối:
 {"type":"res","id":18,"error":{"code":"element_not_found","message":"no element found matching 'Login'"}}
 ```
 
-`id` là số nguyên tăng dần do daemon cấp, extension trả đúng `id`. Mặc định mỗi lệnh timeout **30 giây** ở daemon; kết nối đứt thì mọi lệnh đang chờ trả lỗi `profile 'work' disconnected`.
+**Giới hạn kích thước khung:** `coder/websocket` mặc định giới hạn đọc **32 KiB**, ảnh chụp màn hình base64 sẽ vượt xa. Daemon **bắt buộc** gọi `conn.SetReadLimit(32 << 20)` (32 MiB). Ghi đồng thời từ nhiều goroutine vào cùng `Conn` là an toàn với thư viện này; phần đọc chỉ do một goroutine đảm nhiệm.
+
+`id` là số nguyên tăng dần do daemon cấp, extension trả đúng `id`. Mặc định mỗi lệnh timeout **30 giây** ở daemon, và **huỷ ngay khi `ctx` của request MCP bị huỷ**; kết nối đứt thì mọi lệnh đang chờ trả lỗi `profile 'work' disconnected`.
 
 ### 5.3 Danh sách `method` (đủ cho 12 tool)
 
@@ -165,8 +172,9 @@ Mã lỗi chuẩn: `tab_not_found`, `element_not_found`, `debugger_unavailable`,
 1. Chỉ chấp nhận `RemoteAddr` là loopback; ngược lại trả 403.
 2. Header `Origin` phải bắt đầu bằng `chrome-extension://`; ngược lại 403. (Trang web thường **không** được gọi được endpoint này.)
 3. Khung `hello` phải có `token` đúng, so sánh bằng `subtle.ConstantTimeCompare`.
-4. Token: 32 byte ngẫu nhiên mã hoá hex, lưu ở `~/.browseruse/token` (quyền `0600`, thư mục `0700`), tạo khi daemon khởi động lần đầu. Có lệnh `make token` in ra token để dán vào options của extension.
-5. Không ghi token vào log.
+4. Daemon ghi log (stderr, **không** kèm token) mỗi lần profile kết nối, thay thế, ngắt kết nối.
+5. Token: 32 byte ngẫu nhiên mã hoá hex, lưu ở `~/.browseruse/token` (quyền `0600`, thư mục `0700`), tạo khi daemon khởi động lần đầu. Có lệnh `make token` in ra token để dán vào options của extension.
+6. Không ghi token vào log.
 
 ---
 
@@ -215,13 +223,15 @@ type Driver interface {
 - Badge: `ON` xanh khi đã `hello_ok`, `OFF` khi mất kết nối.
 
 **Cách thực thi từng method**
-- `tabs.create`: `chrome.tabs.create({url, active:false})`. Nếu profile không có cửa sổ nào thì `chrome.windows.create`. Trả `{tabId,url,title}` **sau khi** `status==='complete'` nếu có `url` (tối đa 30s).
+- **Cửa sổ làm việc (quyết định thiết kế):** mặc định extension mở tab của Agent trong **một cửa sổ riêng của profile** (tạo lười bằng `chrome.windows.create({focused:false})`, nhớ `windowId`; nếu cửa sổ bị người dùng đóng thì lần sau tạo lại). Lý do: tab nền (`active:false`) trong cửa sổ đang dùng có thể không vẽ/không nhận sự kiện đúng (xem rủi ro "tab nền" ở mục 9), còn việc kích hoạt tab của Agent trong cửa sổ người dùng sẽ làm nhảy tab họ đang xem. Trong cửa sổ riêng, mỗi tab được `chrome.tabs.update(tabId,{active:true})` trước khi thao tác nên không ảnh hưởng tab người dùng. Options page có chọn `windowMode`: `dedicated` (mặc định) hoặc `current` (mở trong cửa sổ đang focus của profile). **Phase 3 phải chạy spike kiểm chứng** (mục 7) trước khi chốt mặc định.
+- `tabs.create`: tạo tab trong cửa sổ làm việc theo `windowMode`. Trả `{tabId,url,title}` **sau khi** `status==='complete'` nếu có `url` (tối đa 30s).
 - `page.navigate`: `chrome.tabs.update` rồi chờ `onUpdated` với `status==='complete'`, timeout 30s.
 - `page.snapshot`: `chrome.scripting.executeScript({target:{tabId}, func: snapshotFn})` trả `{url,title,elements}`. `snapshotFn` copy nguyên logic `jsExtractElements`.
-- `page.click` / `page.type`: chèn script `findElement` (bản JS, xem dưới) để tìm phần tử, `scrollIntoView`, lấy toạ độ giữa phần tử. Sau đó **ưu tiên click/gõ bằng `chrome.debugger`** (`Input.dispatchMouseEvent`, `Input.insertText`) để sự kiện là "trusted"; nếu gắn debugger không được thì **dự phòng** `el.click()` / gán `value` + phát sự kiện `input` và `change`.
+- `page.click`: chèn script `findElement` (bản JS, xem dưới) để tìm phần tử, `scrollIntoView({block:'center'})`, lấy toạ độ giữa phần tử (trừ offset của iframe nếu có). Sau đó **ưu tiên click bằng `chrome.debugger`** (`Input.dispatchMouseEvent`: `mouseMoved`, `mousePressed`, `mouseReleased`, `clickCount:1`) để sự kiện là "trusted"; nếu gắn debugger không được thì **dự phòng** `el.click()`.
+- `page.type`: tìm phần tử, `el.focus()`, **xoá nội dung cũ** (với `input`/`textarea`: `el.select()`; với `contenteditable`: chọn toàn bộ con bằng `Selection.selectAllChildren`), rồi `Input.insertText` qua debugger (thay thế vùng chọn). Dự phòng khi không có debugger: gán `value` rồi phát sự kiện `input` và `change` (bubbles). Hành vi khớp tool hiện tại: ghi đè nội dung cũ, không nối thêm.
 - `page.pressKey`: `Input.dispatchKeyEvent` (keyDown rồi keyUp) qua debugger. Hỗ trợ tối thiểu: `enter`, `tab`, `escape`/`esc`, `backspace`, `arrowdown`/`down`, `arrowup`/`up` (đúng như tool hiện tại; key lạ thì mặc định Enter như code hiện tại).
 - `page.screenshot`: `Page.captureScreenshot` qua debugger (không cần tab đang active), trả base64.
-- `page.evaluate`: `Runtime.evaluate` với `{returnByValue:true, awaitPromise:true}` trong world MAIN; lỗi script trả `script_error`.
+- `page.evaluate`: chạy trong world MAIN, `returnByValue:true`, lỗi script trả `script_error`. **Tương thích với rod (đã kiểm tra mã nguồn `rod v0.116.2`, `page_eval.go`):** rod bọc `script` thành `(script).apply(this, arguments)`, tức tool hiện tại **chỉ chạy đúng khi `script` là một biểu thức hàm** (ví dụ `() => document.title`); chuỗi như `document.title` sẽ lỗi. Rod cũng **không** `await` Promise. Quyết định cho extension: nhận **cả hai dạng**. Nếu `script` khớp regex `^\s*(async\s+)?(function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)` thì coi là hàm và gọi nó (`await` kết quả nếu là Promise); ngược lại coi là biểu thức và `Runtime.evaluate`. Đây là tập cha của hành vi rod (không phá cách dùng cũ). Ghi rõ điều này trong mô tả tool `browser_evaluate` và README.
 - Quản lý debugger: `chrome.debugger.attach({tabId},"1.3")` lười (lần đầu cần), lưu tập tab đã gắn; `detach` khi tab đóng (`tabs.onRemoved`) hoặc `debugger.onDetach`. Nếu `attach` lỗi (DevTools đang mở, trang bị hạn chế) thì trả `debugger_unavailable` hoặc dùng đường dự phòng ở trên.
 - Trang bị hạn chế (`chrome://`, `chrome-extension://`, Chrome Web Store): trả `restricted_page`.
 
@@ -233,6 +243,8 @@ type Driver interface {
 5. Mọi phần tử có text khớp, **ưu tiên phần tử sâu nhất** (không có con nào khớp) để không chọn `html`/`body`.
 6. Chỉ nhận phần tử có `getBoundingClientRect()` rộng và cao > 0 (nhìn thấy). Không có thì lỗi `element_not_found`.
 (Bản rod thử lần lượt từng bước với timeout 2s do trang có thể chưa render xong. Bản JS cần **thăm dò lại mỗi 200ms trong tối đa 2s** cho mỗi lần tìm, rồi mới kết luận không thấy, để tương đương.)
+
+**Giới hạn đã biết (chấp nhận, ghi vào README):** chỉ thao tác trên **khung (frame) trên cùng**, không chui vào iframe (backend rod cũng vậy); không xử lý hộp thoại `alert/confirm/prompt` (không làm tab bị treo vĩnh viễn: lệnh gặp hộp thoại sẽ hết 30s và trả `timeout`); tab Agent đã mở vẫn còn trong Chrome nếu daemon khởi động lại (bảng `tab-N` bị mất, tab mồ côi do người dùng tự đóng).
 
 **Options page**: ô nhập `label`, `token`, `daemonUrl`; nút Lưu (validate regex nhãn); hiển thị trạng thái kết nối, email Chrome (nếu có), và `instanceId` (chỉ đọc). Lưu xong thì kết nối lại ngay.
 
@@ -252,15 +264,16 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 
 ### Phase 0: Chuẩn bị (nền móng)
 - [ ] Sửa `Makefile` (`build`) và `install.sh` để build bằng `go build -o bin/browseruse .` (nhiều file `.go`).
-- [ ] Thêm cờ `-host` (mặc định `127.0.0.1`), bind `host:port`; cập nhật chuỗi in ra và `Makefile`/README nếu nhắc `localhost`.
+- [ ] Bind loopback bằng **hai listener** `127.0.0.1` và `[::1]` (mục 1.3), cờ `-host` để ghi đè; thêm kiểm tra `Origin` cho `/mcp` và `/sse` (mục 1.3).
 - [ ] Thêm `auth.go`: sinh và đọc token (mục 5.4), lệnh `make token`.
 - [ ] Cập nhật README mục xử lý sự cố nếu đổi cách build.
-- **Nghiệm thu**: `make build`, `make restart`, `make status` chạy; `lsof -nP -iTCP:3025 -sTCP:LISTEN` chỉ thấy `127.0.0.1:3025`; MCP gọi `get_browser_status` vẫn chạy.
+- **Nghiệm thu**: `make build`, `make restart`, `make status` chạy; `lsof -nP -iTCP:3025 -sTCP:LISTEN` chỉ thấy `127.0.0.1` và/hoặc `[::1]`, **không** thấy `*:3025`; `curl http://localhost:3025/mcp` và `curl http://127.0.0.1:3025/mcp` đều tới được server; `curl -H 'Origin: https://evil.example' -X POST http://127.0.0.1:3025/mcp` trả 403; MCP gọi `get_browser_status` vẫn chạy với cấu hình `http://localhost:3025/mcp` cũ. Từ máy khác trong LAN (hoặc `curl` tới IP LAN của máy) kết nối bị từ chối.
 
 ### Phase 1: Tách `Driver` (refactor thuần, không đổi hành vi)
 - [ ] Tạo `driver.go`, `driver_rod.go`, `router.go`; chuyển logic `BrowserManager`, `findElement`, kết nối CDP/launch headless sang `rodDriver`.
 - [ ] Các tool trong `main.go` gọi router.
 - [ ] Giữ nguyên đầu ra văn bản của 12 tool.
+- [ ] **Trước khi refactor**, viết bộ test đặc tả (characterization test) cho `rodDriver` trên trang `data:` URL cục bộ (không cần mạng): `findElement` với 4 dạng selector, `evaluate` dạng hàm và dạng biểu thức, `type` ghi đè nội dung cũ, `snapshot` đúng định dạng. Bộ test này là **chuẩn đối chiếu** để kiểm tra extension ở Phase 4 cho cùng kết quả.
 - **Nghiệm thu**: `go build .`, `go vet ./...`; `go test ./...` giữ kết quả như trước (các test cần mạng được phép bỏ qua bằng `t.Skip` khi không có mạng, **không** đổi ý nghĩa); chạy tay 12 tool qua MCP, kết quả giống trước.
 
 ### Phase 2: Hub + giao thức (chưa cần Chrome thật)
@@ -271,10 +284,18 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
   - token sai, Origin không phải `chrome-extension://`, nhãn sai -> bị từ chối đúng mã lỗi.
   - hai kết nối cùng nhãn: cùng `instanceId` thì thay, khác thì `label_in_use`.
   - lệnh đang chờ gặp mất kết nối -> lỗi `disconnected`, không treo.
-  - lệnh quá 30s -> `timeout` (cho phép đặt timeout nhỏ trong test).
+  - lệnh quá 30s -> `timeout` (cho phép đặt timeout nhỏ trong test); `ctx` bị huỷ thì lệnh đang chờ kết thúc ngay.
+  - khung phản hồi ~5 MB (giả lập ảnh chụp) được nhận đủ, không bị cắt hay ngắt kết nối.
+  - `protocol` khác phiên bản -> `bad_protocol`.
   - router: 0/1/≥2 profile online cho đúng 3 hành vi ở mục 2.4.
 
 ### Phase 3: Extension bản tối thiểu
+- [ ] **Spike trước (làm đầu tiên, ghi kết quả vào mục "Kết quả spike" cuối file này):** với một extension tối giản kết nối được daemon, kiểm chứng bằng thực nghiệm trên Chrome của chủ repo:
+  1. Service worker còn kết nối sau 5 phút nhàn rỗi không? (ping 20s + alarm 30s)
+  2. Trong **cửa sổ riêng**, `Page.captureScreenshot` và `Input.dispatchMouseEvent` hoạt động khi cửa sổ đó **không focus** và khi **bị cửa sổ khác che hoàn toàn**? Cũng thử với tab `active:false` trong cửa sổ người dùng để đối chiếu.
+  3. `chrome.identity.getProfileUserInfo` trả email ở profile đã đăng nhập Chrome?
+  4. Chrome có hiện cảnh báo/khoá extension unpacked không?
+  Từ kết quả, chốt mặc định `windowMode` và ghi lại; nếu cả hai cách đều không đáng tin thì **dừng và hỏi chủ repo** trước khi làm tiếp.
 - [ ] `manifest.json`, `background.js`, `options.html/js`, kết nối + giữ sống + `hello`.
 - [ ] Hỗ trợ `tabs.create`, `tabs.list`, `tabs.close`, `page.navigate`, `page.snapshot`.
 - [ ] `list_profiles` hoạt động.
@@ -282,6 +303,7 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 
 ### Phase 4: Tương tác
 - [ ] `lib/find_element.js`, `page.click`, `page.type`, `page.pressKey`, `page.screenshot`, `page.evaluate`, quản lý debugger.
+- **Đối chiếu với bộ test đặc tả của Phase 1:** chạy cùng các kịch bản (4 dạng selector, `evaluate` hàm và biểu thức, `type` ghi đè, định dạng `snapshot`) lên extension bằng một trang test cục bộ (`python3 -m http.server` phục vụ file HTML trong thư mục tạm, vì extension không đọc được `data:`/`file:` tuỳ cài đặt), kết quả phải khớp rod; ghi lại mọi khác biệt.
 - **Nghiệm thu thủ công** trên `https://example.com`, một trang có form đăng nhập (vd trang test công khai), và một trang SPA: click link, gõ vào ô input + Enter, chụp ảnh và mở được file PNG, `evaluate("document.title")`.
 
 ### Phase 5: Nhiều profile song song
@@ -304,6 +326,7 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - Không hỗ trợ Firefox/Safari.
 - Không hỗ trợ điều khiển tab do người dùng tự mở (chưa có cơ chế "adopt tab"; để dành sau).
 - Không làm tab group, không làm giao diện đẹp cho options.
+- Không hỗ trợ iframe, hộp thoại JS (`alert/confirm/prompt`), kéo thả, tải lên file.
 - Không tự thêm xác thực cho endpoint `/mcp` (ngoài phạm vi; bind `127.0.0.1` ở Phase 0 là đủ cho lần này).
 
 ## 9. Rủi ro và điểm phải kiểm chứng sớm
@@ -316,6 +339,9 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 | Chrome nhắc tắt extension chưa đóng gói | Ghi trong README, không xử lý |
 | `findElement` bản JS lệch hành vi so với rod | Viết bộ test thủ công ở Phase 4 trên cùng một trang cho cả hai backend và so kết quả |
 | Giữ `tab-N` toàn cục khi profile offline rồi online lại | Tab cũ của profile đó coi là mất; router dọn bảng khi hub báo ngắt kết nối |
+| **Tab nền không vẽ/nhận sự kiện:** `Page.captureScreenshot` và input qua CDP trên tab không hiển thị có thể treo hoặc bị bỏ qua | Dùng cửa sổ riêng + kích hoạt tab trước khi thao tác; kiểm chứng ở spike Phase 3; phương án cuối là `chrome.tabs.captureVisibleTab` sau khi kích hoạt |
+| Tự động hoá E2E bằng cách nạp extension qua cờ `--load-extension` | Có thể bị vô hiệu trên Chrome bản chính thức từ khoảng v137 (chưa kiểm chứng ở máy này). Không dựa vào nó; E2E extension là thủ công. Tuỳ chọn: dùng Chrome for Testing |
+| Ảnh chụp lớn vượt giới hạn WebSocket 32 KiB mặc định | `SetReadLimit(32<<20)` (mục 5.2), có test gửi khung ~5 MB |
 | Chỉ có thể test E2E thật trên máy chủ repo (macOS, nhiều profile) | Phần tự động hoá giới hạn ở hub/router (Phase 2); phần extension nghiệm thu thủ công, ghi rõ kết quả |
 
 ## 10. Tiêu chí hoàn thành toàn bộ
@@ -332,3 +358,13 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 ## 11. Cách báo cáo khi xong mỗi phase
 
 Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (dán đầu ra), những gì đã kiểm chứng tay và những gì **chưa** kiểm chứng, và mọi chỗ làm khác với tài liệu này kèm lý do. Gặp điểm không rõ trong tài liệu thì **hỏi trước khi đoán**, đừng đổi hợp đồng ở mục 5 hay 6 một mình.
+
+## 12. Kết quả spike (AGY điền ở Phase 3)
+
+| Câu hỏi | Kết quả | Quyết định |
+| :--- | :--- | :--- |
+| Service worker sống sau 5 phút nhàn rỗi? | _chưa kiểm chứng_ | |
+| Screenshot/click trong cửa sổ riêng khi không focus / bị che? | _chưa kiểm chứng_ | |
+| Email Chrome đọc được? | _chưa kiểm chứng_ | |
+| Chrome có khoá extension unpacked? | _chưa kiểm chứng_ | |
+| `windowMode` mặc định chốt là | _chưa chốt_ | |
