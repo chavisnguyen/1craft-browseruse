@@ -9,7 +9,7 @@ PID_FILE := daemon.pid
 LOG_FILE := daemon.log
 PORT ?= 3025
 
-.PHONY: all build install install-stdio daemon stop restart status chrome test clean help
+.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help
 
 all: build
 
@@ -17,8 +17,12 @@ all: build
 build:
 	@echo "🔨 Building $(BIN_PATH)..."
 	@mkdir -p $(BIN_DIR)
-	@go build -o $(BIN_PATH) ./main.go
+	@go build -o $(BIN_PATH) .
 	@echo "✅ Build success: $(BIN_PATH)"
+
+## token: Hiển thị auth token dùng cho Chrome extension
+token: build
+	@$(BIN_PATH) -token
 
 ## daemon: Chạy SSE Server dưới nền (dành cho nhiều Agent dùng đồng thời)
 daemon: build
@@ -98,7 +102,9 @@ help:
 	@echo "Targets:"
 	@echo "  make daemon        - Bật SSE Server ngầm (Port 3025) cho nhiều Agent"
 	@echo "  make stop          - Dừng SSE Server"
+	@echo "  make restart       - Khởi động lại SSE Server"
 	@echo "  make status        - Kiểm tra trạng thái Daemon và Chrome"
+	@echo "  make token         - Hiển thị auth token dùng cho Chrome extension"
 	@echo "  make install       - Cài đặt MCP chế độ SSE vào các Agent (mặc định)"
 	@echo "  make install-stdio - Cài đặt MCP chế độ stdio vào các Agent"
 	@echo "  make chrome        - Bật Chrome cổng 9222 để dùng chung"

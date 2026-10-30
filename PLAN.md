@@ -263,10 +263,10 @@ type Driver interface {
 Mỗi phase kết thúc bằng một commit, các test của phase đó phải xanh, và `go vet ./...` sạch. Làm **tuần tự**, đừng gộp phase.
 
 ### Phase 0: Chuẩn bị (nền móng)
-- [ ] Sửa `Makefile` (`build`) và `install.sh` để build bằng `go build -o bin/browseruse .` (nhiều file `.go`).
-- [ ] Bind loopback bằng **hai listener** `127.0.0.1` và `[::1]` (mục 1.3), cờ `-host` để ghi đè; thêm kiểm tra `Origin` cho `/mcp` và `/sse` (mục 1.3).
-- [ ] Thêm `auth.go`: sinh và đọc token (mục 5.4), lệnh `make token`.
-- [ ] Cập nhật README mục xử lý sự cố nếu đổi cách build.
+- [x] Sửa `Makefile` (`build`) và `install.sh` để build bằng `go build -o bin/browseruse .` (nhiều file `.go`).
+- [x] Bind loopback bằng **hai listener** `127.0.0.1` và `[::1]` (mục 1.3), cờ `-host` để ghi đè; thêm kiểm tra `Origin` cho `/mcp` và `/sse` (mục 1.3).
+- [x] Thêm `auth.go`: sinh và đọc token (mục 5.4), lệnh `make token`.
+- [x] Cập nhật README mục xử lý sự cố nếu đổi cách build.
 - **Nghiệm thu**: `make build`, `make restart`, `make status` chạy; `lsof -nP -iTCP:3025 -sTCP:LISTEN` chỉ thấy `127.0.0.1` và/hoặc `[::1]`, **không** thấy `*:3025`; `curl http://localhost:3025/mcp` và `curl http://127.0.0.1:3025/mcp` đều tới được server; `curl -H 'Origin: https://evil.example' -X POST http://127.0.0.1:3025/mcp` trả 403; MCP gọi `get_browser_status` vẫn chạy với cấu hình `http://localhost:3025/mcp` cũ. Từ máy khác trong LAN (hoặc `curl` tới IP LAN của máy) kết nối bị từ chối.
 
 ### Phase 1: Tách `Driver` (refactor thuần, không đổi hành vi)

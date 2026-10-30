@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -676,12 +677,28 @@ func setupMCPServer() *server.MCPServer {
 func main() {
 	sseMode := flag.Bool("sse", false, "Run in HTTP/SSE Server daemon mode (default is stdio)")
 	port := flag.String("port", "3025", "Port to bind HTTP/SSE server (e.g. 3025)")
+	host := flag.String("host", "", "Specific host to bind (default empty: binds dual-stack loopback 127.0.0.1 and [::1])")
+	tokenFlag := flag.Bool("token", false, "Print auth token for Chrome extension and exit")
 	flag.Parse()
+
+	if *tokenFlag {
+		tok, err := GetOrCreateToken()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error getting auth token: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println(tok)
+		return
+	}
 
 	s := setupMCPServer()
 
 	if *sseMode {
-		addr := ":" + *port
+		// Initialize or ensure auth token exists
+		if _, err := GetOrCreateToken(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to initialize auth token: %v\n", err)
+		}
+
 		streamableServer := server.NewStreamableHTTPServer(s,
 			server.WithStreamableHTTPCORS(),
 		)
@@ -695,8 +712,17 @@ func main() {
 			http.NotFound(w, r)
 		})
 
-		// Logging wrapper to trace all incoming requests from agents
+		// Logging & security wrapper to trace requests and protect endpoints
 		loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Defense-in-depth: reject non-allowed Origin headers on /mcp and /sse
+			if r.URL.Path == "/mcp" || r.URL.Path == "/sse" {
+				origin := r.Header.Get("Origin")
+				if !IsOriginAllowed(origin) {
+					http.Error(w, "Forbidden: Origin not allowed", http.StatusForbidden)
+					return
+				}
+			}
+
 			if r.Method == http.MethodPost {
 				bodyBytes, err := io.ReadAll(r.Body)
 				if err == nil {
@@ -711,23 +737,59 @@ func main() {
 		})
 
 		httpServer := &http.Server{
-			Addr:    addr,
 			Handler: loggingHandler,
 		}
 
-		fmt.Printf("🚀 Starting browseruse MCP Server (HTTP/SSE Daemon) on http://localhost:%s/mcp\n", *port)
+		var listeners []net.Listener
+		if *host != "" {
+			ln, err := net.Listen("tcp", net.JoinHostPort(*host, *port))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to bind %s:%s: %v\n", *host, *port, err)
+				os.Exit(1)
+			}
+			listeners = append(listeners, ln)
+		} else {
+			// Dual-stack loopback binding: IPv4 and IPv6
+			ln4, err4 := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", *port))
+			if err4 != nil {
+				fmt.Fprintf(os.Stderr, "Failed to bind IPv4 loopback 127.0.0.1:%s: %v\n", *port, err4)
+			} else {
+				listeners = append(listeners, ln4)
+			}
+
+			ln6, err6 := net.Listen("tcp6", net.JoinHostPort("::1", *port))
+			if err6 != nil {
+				// IPv6 might be disabled on some machines, only warn if IPv4 succeeded
+				if err4 != nil {
+					fmt.Fprintf(os.Stderr, "Failed to bind IPv6 loopback [::1]:%s: %v\n", *port, err6)
+				}
+			} else {
+				listeners = append(listeners, ln6)
+			}
+
+			if len(listeners) == 0 {
+				fmt.Fprintf(os.Stderr, "Error: failed to bind any loopback interface on port %s\n", *port)
+				os.Exit(1)
+			}
+		}
+
+		fmt.Printf("🚀 Starting browseruse MCP Server (HTTP/SSE Daemon) on port %s\n", *port)
+		for _, l := range listeners {
+			fmt.Printf("   Listening on http://%s/mcp\n", l.Addr())
+		}
 		fmt.Printf("   Endpoints supported: /mcp, /sse, /\n")
 
 		// Graceful shutdown handling
 		stopChan := make(chan os.Signal, 1)
 		signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
 
-		go func() {
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				fmt.Fprintf(os.Stderr, "HTTP Server error: %v\n", err)
-				os.Exit(1)
-			}
-		}()
+		for _, l := range listeners {
+			go func(ln net.Listener) {
+				if err := httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
+					fmt.Fprintf(os.Stderr, "HTTP Server error on %s: %v\n", ln.Addr(), err)
+				}
+			}(l)
+		}
 
 		<-stopChan
 		fmt.Println("\n🛑 Shutting down browseruse MCP Server...")

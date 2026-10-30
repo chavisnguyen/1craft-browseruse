@@ -24,6 +24,7 @@ MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ c
 | `make stop` | Tắt SSE Server ngầm |
 | `make restart` | Khởi động lại Server |
 | `make status` | Kiểm tra trạng thái Server và kết nối Chrome cổng 9222 |
+| `make token` | Lấy auth token để cấu hình kết nối Chrome extension |
 | `make install` | Cài đặt MCP chế độ SSE (`http://localhost:3025/mcp`) vào AGY, Claude Code, OpenCode, Kiro, Claude Desktop |
 | `make install-stdio` | Cài đặt MCP chế độ stdio (chạy binary trực tiếp khi cần) |
 | `make chrome` | Bật Chrome với cổng HTTP 9222 (chỉ cần khi không dùng `chrome://inspect`) |
@@ -103,7 +104,7 @@ Server tự đọc lại `DevToolsActivePort` ở mỗi lần dùng, nên Chrome
 | Hai icon Chrome trong Dock | Từng xảy ra khi server tự launch Chrome không headless. Bản hiện tại mặc định headless; nếu còn sót thì `pkill -f "rod/user-data"` hoặc `make restart` |
 | `curl http://127.0.0.1:9222/json/version` trả `404` | Bình thường với Chrome hằng ngày bật qua `chrome://inspect`; server không dùng endpoint này |
 | MCP báo `ECONNREFUSED` trong Claude Code | Daemon đã tắt (thoát terminal, tắt máy...). `make daemon` rồi `/mcp` Reconnect |
-| `make build` / `go build .` báo `main redeclared` | Có nhiều file `package main` trong thư mục. Makefile build `./main.go` riêng; đừng dùng `go build .` |
+| Lỗi biên dịch khi phát triển | Chạy `go build .` hoặc `make build` để biên dịch toàn bộ package main (gồm nhiều file Go). |
 | Đăng nhập mất khi Chrome bị tắt | Server rơi về Chrome headless dự phòng (profile trống). Mở lại Chrome hằng ngày, các lần gọi sau tự nối lại |
 
 ---
