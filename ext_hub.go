@@ -38,6 +38,7 @@ type HelloMessage struct {
 	Protocol   int    `json:"protocol"`
 	Token      string `json:"token"`
 	Profile    string `json:"profile"`
+	Label      string `json:"label"` // Support "label" per PLAN.md Section 5.1
 	Email      string `json:"email,omitempty"`
 	InstanceID string `json:"instanceId"`
 	Version    string `json:"version,omitempty"`
@@ -290,6 +291,10 @@ func (h *ExtHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if hello.Profile == "" && hello.Label != "" {
+		hello.Profile = hello.Label
+	}
+
 	// Protocol version check
 	if hello.Protocol != ProtocolVersion {
 		_ = h.sendHelloError(conn, "bad_protocol",
@@ -370,6 +375,8 @@ func (h *ExtHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var msgTypeStr string
 		if tVal, ok := generic["type"]; ok {
 			_ = json.Unmarshal(tVal, &msgTypeStr)
+		} else if _, hasID := generic["id"]; hasID {
+			msgTypeStr = "res"
 		}
 
 		switch msgTypeStr {

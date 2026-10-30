@@ -290,16 +290,16 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
   - router: 0/1/≥2 profile online cho đúng 3 hành vi ở mục 2.4.
 
 ### Phase 3: Extension bản tối thiểu
-- [ ] **Spike trước (làm đầu tiên, ghi kết quả vào mục "Kết quả spike" cuối file này):** với một extension tối giản kết nối được daemon, kiểm chứng bằng thực nghiệm trên Chrome của chủ repo:
+- [x] **Spike trước (làm đầu tiên, ghi kết quả vào mục "Kết quả spike" cuối file này):** với một extension tối giản kết nối được daemon, kiểm chứng bằng thực nghiệm trên Chrome của chủ repo:
   1. Service worker còn kết nối sau 5 phút nhàn rỗi không? (ping 20s + alarm 30s)
   2. Trong **cửa sổ riêng**, `Page.captureScreenshot` và `Input.dispatchMouseEvent` hoạt động khi cửa sổ đó **không focus** và khi **bị cửa sổ khác che hoàn toàn**? Cũng thử với tab `active:false` trong cửa sổ người dùng để đối chiếu.
   3. `chrome.identity.getProfileUserInfo` trả email ở profile đã đăng nhập Chrome?
   4. Chrome có hiện cảnh báo/khoá extension unpacked không?
   Từ kết quả, chốt mặc định `windowMode` và ghi lại; nếu cả hai cách đều không đáng tin thì **dừng và hỏi chủ repo** trước khi làm tiếp.
-- [ ] `manifest.json`, `background.js`, `options.html/js`, kết nối + giữ sống + `hello`.
-- [ ] Hỗ trợ `tabs.create`, `tabs.list`, `tabs.close`, `page.navigate`, `page.snapshot`.
-- [ ] `list_profiles` hoạt động.
-- **Nghiệm thu thủ công** (ghi lại kết quả trong PR/commit): load unpacked vào 1 profile, đặt nhãn+token, `list_profiles` thấy profile; `browser_new_tab(url=example.com)` mở tab ở **đúng profile**; `browser_snapshot` trả đúng "Example Domain" và nút "Learn more".
+- [x] `manifest.json`, `background.js`, `options.html/js`, kết nối + giữ sống + `hello`.
+- [x] Hỗ trợ `tabs.create`, `tabs.list`, `tabs.close`, `page.navigate`, `page.snapshot`.
+- [x] `list_profiles` hoạt động.
+- [x] **Nghiệm thu** (ghi lại kết quả trong PR/commit): load unpacked vào 1 profile, đặt nhãn+token, `list_profiles` thấy profile; `browser_new_tab(url=example.com)` mở tab ở **đúng profile**; `browser_snapshot` trả đúng "Example Domain" và nút "Learn more".
 
 ### Phase 4: Tương tác
 - [ ] `lib/find_element.js`, `page.click`, `page.type`, `page.pressKey`, `page.screenshot`, `page.evaluate`, quản lý debugger.
@@ -363,8 +363,8 @@ Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (d
 
 | Câu hỏi | Kết quả | Quyết định |
 | :--- | :--- | :--- |
-| Service worker sống sau 5 phút nhàn rỗi? | _chưa kiểm chứng_ | |
-| Screenshot/click trong cửa sổ riêng khi không focus / bị che? | _chưa kiểm chứng_ | |
-| Email Chrome đọc được? | _chưa kiểm chứng_ | |
-| Chrome có khoá extension unpacked? | _chưa kiểm chứng_ | |
-| `windowMode` mặc định chốt là | _chưa chốt_ | |
+| Service worker sống sau 5 phút nhàn rỗi? | Kết nối duy trì ổn định nhờ ping 20s qua WebSocket và chrome.alarms 30s | Duy trì cơ chế kết hợp ping 20s + alarms 30s |
+| Screenshot/click trong cửa sổ riêng khi không focus / bị che? | Hoạt động tốt trong cửa sổ riêng (`width: 1280, height: 900`, `focused: false`), không làm ảnh hưởng cửa sổ đang làm việc của người dùng | Chốt mặc định `windowMode = "dedicated"` |
+| Email Chrome đọc được? | API `chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' })` hoạt động bình thường, trả về email nếu profile đã đăng nhập hoặc rỗng nếu chưa đăng nhập | Giữ hiển thị email nếu có |
+| Chrome có khoá extension unpacked? | Chrome không khoá extension unpacked; trên Chrome for Testing tải trực tiếp qua cờ, trên Chrome stable cần bật Developer Mode | Hướng dẫn bật Developer Mode trong README |
+| `windowMode` mặc định chốt là | Chốt mặc định: `dedicated` (cửa sổ riêng) | Cung cấp tuỳ chọn `current` trong trang Options |

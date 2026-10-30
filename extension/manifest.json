@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "browseruse bridge",
+  "version": "1.0.0",
+  "description": "Chrome extension bridge for browseruse MCP daemon",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "debugger",
+    "storage",
+    "alarms",
+    "identity"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "browseruse bridge"
+  }
+}

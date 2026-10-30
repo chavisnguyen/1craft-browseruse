@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Cài đặt browseruse bridge</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background-color: #f8f9fa;
+      color: #212529;
+    }
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.25rem;
+      border-bottom: 1px solid #e9ecef;
+      padding-bottom: 12px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    input[type="text"], input[type="password"], select {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 12px;
+      font-size: 0.95rem;
+      border: 1px solid #ced4da;
+      border-radius: 4px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #4dabf7;
+      box-shadow: 0 0 0 2px rgba(77,171,247,0.25);
+    }
+    .help-text {
+      font-size: 0.8rem;
+      color: #6c757d;
+      margin-top: 4px;
+    }
+    .btn {
+      background-color: #228be6;
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background-color: #1c7ed6;
+    }
+    .status-box {
+      margin-top: 20px;
+      padding: 12px;
+      background: #f1f3f5;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .status-item {
+      margin-bottom: 6px;
+    }
+    .status-item:last-child {
+      margin-bottom: 0;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+      font-size: 0.75rem;
+    }
+    .badge-on { background: #d3f9d8; color: #2b8a3e; }
+    .badge-off { background: #ffe3e3; color: #c92a2a; }
+    .alert {
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      display: none;
+      font-size: 0.9rem;
+    }
+    .alert-success { background: #d3f9d8; color: #2b8a3e; }
+    .alert-error { background: #ffe3e3; color: #c92a2a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Cài đặt browseruse bridge</h2>
+
+    <div id="alertBox" class="alert"></div>
+
+    <form id="optionsForm">
+      <div class="form-group">
+        <label for="labelInput">Tên hồ sơ (Profile Label):</label>
+        <input type="text" id="labelInput" placeholder="ví dụ: work hoặc personal" required pattern="^[a-zA-Z0-9_-]{1,32}$" />
+        <div class="help-text">Chỉ gồm chữ cái, số, gạch dưới (_) và gạch ngang (-). Tối đa 32 ký tự.</div>
+      </div>
+
+      <div class="form-group">
+        <label for="tokenInput">Mã xác thực (Daemon Token):</label>
+        <input type="password" id="tokenInput" placeholder="Dán mã 64 ký tự hex từ lệnh `make token`" required minlength="64" maxlength="64" />
+        <div class="help-text">Chạy <code>make token</code> trong thư mục daemon để lấy token.</div>
+      </div>
+
+      <div class="form-group">
+        <label for="daemonUrlInput">Địa chỉ Daemon WebSocket:</label>
+        <input type="text" id="daemonUrlInput" value="ws://127.0.0.1:3025/ext" required />
+        <div class="help-text">Mặc định: <code>ws://127.0.0.1:3025/ext</code></div>
+      </div>
+
+      <div class="form-group">
+        <label for="windowModeSelect">Chế độ cửa sổ (Window Mode):</label>
+        <select id="windowModeSelect">
+          <option value="dedicated" selected>Cửa sổ riêng (Dedicated window - Khuyến nghị)</option>
+          <option value="current">Cửa sổ đang dùng (Current window)</option>
+        </select>
+        <div class="help-text">Cửa sổ riêng giúp tab của Agent không làm phiền cửa sổ làm việc của bạn.</div>
+      </div>
+
+      <button type="submit" class="btn" id="saveBtn">Lưu & Kết nối</button>
+    </form>
+
+    <div class="status-box">
+      <div class="status-item">
+        <strong>Trạng thái kết nối:</strong> <span id="connStatus" class="badge badge-off">Đang kiểm tra...</span>
+      </div>
+      <div class="status-item">
+        <strong>Email Chrome:</strong> <span id="userEmail">-</span>
+      </div>
+      <div class="status-item">
+        <strong>Instance ID:</strong> <span id="instanceId" style="font-family: monospace;">-</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

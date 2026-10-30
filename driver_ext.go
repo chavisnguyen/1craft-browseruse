@@ -58,10 +58,17 @@ func (d *ExtDriver) CheckAlive(ctx context.Context, handle string) bool {
 		return false
 	}
 
+	var res struct {
+		Tabs []struct {
+			TabID int `json:"tabId"`
+		} `json:"tabs"`
+	}
 	var tabs []struct {
 		TabID int `json:"tabId"`
 	}
-	if err := json.Unmarshal(raw, &tabs); err != nil || len(tabs) == 0 {
+	if err := json.Unmarshal(raw, &res); err == nil && len(res.Tabs) > 0 {
+		tabs = res.Tabs
+	} else if err := json.Unmarshal(raw, &tabs); err != nil || len(tabs) == 0 {
 		return false
 	}
 	return true
@@ -115,12 +122,21 @@ func (d *ExtDriver) ListTabs(ctx context.Context, handles []string) ([]TabInfo, 
 		return nil, err
 	}
 
+	var res struct {
+		Tabs []struct {
+			TabID int    `json:"tabId"`
+			URL   string `json:"url"`
+			Title string `json:"title"`
+		} `json:"tabs"`
+	}
 	var tabs []struct {
 		TabID int    `json:"tabId"`
 		URL   string `json:"url"`
 		Title string `json:"title"`
 	}
-	if err := json.Unmarshal(raw, &tabs); err != nil {
+	if err := json.Unmarshal(raw, &res); err == nil && len(res.Tabs) > 0 {
+		tabs = res.Tabs
+	} else if err := json.Unmarshal(raw, &tabs); err != nil {
 		return nil, fmt.Errorf("invalid tabs.list response: %w", err)
 	}
 
