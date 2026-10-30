@@ -20,13 +20,13 @@ MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ c
 
 | Lệnh | Ý nghĩa |
 | :--- | :--- |
-| `make daemon` | Bật SSE Server ngầm tại `http://localhost:3025/sse` |
+| `make daemon` | Bật SSE Server ngầm tại `http://localhost:3025/mcp` |
 | `make stop` | Tắt SSE Server ngầm |
 | `make restart` | Khởi động lại Server |
 | `make status` | Kiểm tra trạng thái Server và kết nối Chrome cổng 9222 |
-| `make install` | Cài đặt MCP chế độ SSE (`http://localhost:3025/sse`) vào AGY, Claude Code, OpenCode, Kiro, Claude Desktop |
+| `make install` | Cài đặt MCP chế độ SSE (`http://localhost:3025/mcp`) vào AGY, Claude Code, OpenCode, Kiro, Claude Desktop |
 | `make install-stdio` | Cài đặt MCP chế độ stdio (chạy binary trực tiếp khi cần) |
-| `make chrome` | Bật Google Chrome với cổng remote debugging 9222 |
+| `make chrome` | Bật Chrome với cổng HTTP 9222 (chỉ cần khi không dùng `chrome://inspect`) |
 | `make test` | Chạy bộ kiểm thử tự động đa Tab |
 | `make clean` | Dọn dẹp binary, file log, pid |
 
@@ -52,10 +52,62 @@ MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ c
 ## 💡 Hướng dẫn sử dụng hàng ngày
 
 ```bash
-# 1. Bật Chrome của bạn (để giữ login)
-make chrome
-
-# 2. Bật daemon chạy nền (cho mọi Agent cắm vào)
-make daemon
+make daemon     # bật daemon chạy nền (một lần, mọi Agent dùng chung)
+make status     # kiểm tra: daemon 🟢 và Chrome 🟢
 ```
-Sau đó bạn có thể mở đồng thời **Claude Code**, **AGY**, hay **Cursor** và ra lệnh duyệt web mà không sợ bị đè thao tác!
+Sau đó mở đồng thời **Claude Code**, **AGY**, hay **Cursor** và ra lệnh duyệt web mà không sợ bị đè thao tác. Endpoint MCP: `http://localhost:3025/mcp`.
+
+---
+
+## 🔌 Server lấy Chrome từ đâu?
+
+Mỗi lần có Agent gọi tool, server tìm trình duyệt theo thứ tự:
+
+| Thứ tự | Cách | Khi nào | Có login của bạn? | Icon Dock? |
+| :--- | :--- | :--- | :--- | :--- |
+| 1 | **Chrome hằng ngày** (qua `chrome://inspect`) | Đã bật công tắc, xem mục "Cài đặt lần đầu" | ✅ | Không thêm |
+| 2 | **Chrome có cổng HTTP** `http://127.0.0.1:9222` | Chạy `make chrome` hoặc `./start-chrome.sh isolated` | ✅ (main) / ❌ (isolated) | Không thêm / thêm 1 |
+| 3 | **Chrome headless dự phòng** | Hai cách trên đều không có | ❌ profile trống | Không có |
+
+Chrome tự launch (cách 3) sẽ tự tắt khi đóng tab cuối, và tự launch lại nếu bị tắt giữa chừng. Chrome ở cách 1 và 2 thì server **không bao giờ tắt** giúp bạn.
+
+### Cài đặt lần đầu (dùng Chrome hằng ngày)
+
+Chrome hiện tại (136+) chỉ cho Agent nối vào profile hằng ngày qua cơ chế remote debugging riêng, không còn endpoint HTTP `/json/version` (trả `404`).
+
+1. Mở `chrome://inspect/#remote-debugging` trong Chrome, **bật công tắc**. Nếu Chrome hiện hộp thoại xin phép khi Agent kết nối, bấm Allow.
+2. Cấp quyền đọc profile Chrome cho terminal chạy daemon, vì macOS chặn đọc file `~/Library/Application Support/Google/Chrome/DevToolsActivePort`:
+   * System Settings → Privacy & Security → **Full Disk Access** → bật cho app terminal bạn dùng (Terminal, iTerm, cmux...).
+   * **Thoát hẳn** terminal (Cmd+Q) rồi mở lại.
+   * Kiểm tra: `cat ~/Library/Application\ Support/Google/Chrome/DevToolsActivePort` phải in ra 2 dòng (port và `/devtools/browser/<id>`).
+3. Chạy `make restart && make status`, phải thấy cả 🟢 daemon và 🟢 Chrome.
+4. Trong Claude Code gõ `/mcp` và Reconnect `browseruse` nếu cần.
+
+Server tự đọc lại `DevToolsActivePort` ở mỗi lần dùng, nên Chrome khởi động lại (id websocket đổi) cũng không cần cấu hình lại.
+
+### Biến môi trường
+
+| Biến | Ý nghĩa |
+| :--- | :--- |
+| `CHROME_CDP_URL` | Địa chỉ Chrome. Mặc định `http://127.0.0.1:9222`. Nhận cả `ws://127.0.0.1:9222/devtools/browser/<id>` nếu không đọc được `DevToolsActivePort` |
+| `BROWSER_HEADLESS` | Chỉ ảnh hưởng Chrome tự launch (cách 3). Mặc định headless. Đặt `false` để thấy cửa sổ (sẽ có thêm icon Dock) |
+
+---
+
+## 🧯 Xử lý sự cố
+
+| Triệu chứng | Nguyên nhân / Cách sửa |
+| :--- | :--- |
+| `get_browser_status` báo 🔴 "Standalone Chrome" | Server không nối được Chrome hằng ngày. Kiểm tra: công tắc `chrome://inspect/#remote-debugging` còn bật; terminal có Full Disk Access; `make status` xanh. Log: `daemon.log` (dòng `resolveCDP: cannot read DevToolsActivePort`) |
+| `operation not permitted` khi đọc `DevToolsActivePort` | macOS chặn. Làm lại bước 2 ở "Cài đặt lần đầu", nhớ Cmd+Q terminal. Lưu ý: tiến trình chạy trong sandbox của Claude Code cũng bị chặn, hãy chạy `make restart` từ terminal của bạn, không từ Agent |
+| Hai icon Chrome trong Dock | Từng xảy ra khi server tự launch Chrome không headless. Bản hiện tại mặc định headless; nếu còn sót thì `pkill -f "rod/user-data"` hoặc `make restart` |
+| `curl http://127.0.0.1:9222/json/version` trả `404` | Bình thường với Chrome hằng ngày bật qua `chrome://inspect`; server không dùng endpoint này |
+| MCP báo `ECONNREFUSED` trong Claude Code | Daemon đã tắt (thoát terminal, tắt máy...). `make daemon` rồi `/mcp` Reconnect |
+| `make build` / `go build .` báo `main redeclared` | Có nhiều file `package main` trong thư mục. Makefile build `./main.go` riêng; đừng dùng `go build .` |
+| Đăng nhập mất khi Chrome bị tắt | Server rơi về Chrome headless dự phòng (profile trống). Mở lại Chrome hằng ngày, các lần gọi sau tự nối lại |
+
+---
+
+## ⚠️ Lưu ý bảo mật
+
+Khi nối vào Chrome hằng ngày, Agent thao tác bằng **chính tài khoản và cookie đang đăng nhập của bạn**. Chỉ giao cho Agent những việc bạn chấp nhận để nó làm dưới danh nghĩa mình. Muốn tách biệt, dùng profile riêng: `./start-chrome.sh isolated` (profile `~/.chrome-ai-profile`, cổng 9222, cần Chrome hằng ngày chưa chiếm cổng đó).
