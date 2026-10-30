@@ -277,9 +277,9 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - **Nghiệm thu**: `go build .`, `go vet ./...`; `go test ./...` giữ kết quả như trước (các test cần mạng được phép bỏ qua bằng `t.Skip` khi không có mạng, **không** đổi ý nghĩa); chạy tay 12 tool qua MCP, kết quả giống trước.
 
 ### Phase 2: Hub + giao thức (chưa cần Chrome thật)
-- [ ] `ext_hub.go`: endpoint `/ext`, kiểm tra loopback/Origin/token, registry profile, `req/res` với `id`, timeout 30s, huỷ lệnh khi mất kết nối, `ping/pong`.
-- [ ] `driver_ext.go` gọi qua hub; router biết chọn profile (mục 2.4).
-- [ ] `ext_hub_test.go`: viết **client giả lập extension** trong Go (dùng `coder/websocket`) để kiểm thử.
+- [x] `ext_hub.go`: endpoint `/ext`, kiểm tra loopback/Origin/token, registry profile, `req/res` với `id`, timeout 30s, huỷ lệnh khi mất kết nối, `ping/pong`.
+- [x] `driver_ext.go` gọi qua hub; router biết chọn profile (mục 2.4).
+- [x] `ext_hub_test.go`: viết **client giả lập extension** trong Go (dùng `coder/websocket`) để kiểm thử.
 - **Nghiệm thu bằng test tự động** (bắt buộc có):
   - token sai, Origin không phải `chrome-extension://`, nhãn sai -> bị từ chối đúng mã lỗi.
   - hai kết nối cùng nhãn: cùng `instanceId` thì thay, khác thì `label_in_use`.

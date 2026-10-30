@@ -32,7 +32,7 @@ func TestBrowserMultiTab(t *testing.T) {
 	defer os.Unsetenv("BROWSER_HEADLESS")
 
 	ctx := context.Background()
-	router := NewRouter(defaultRodDriver)
+	router := NewRouter(defaultRodDriver, nil)
 
 	// 1. Create first tab
 	tabID1, summary1, err := router.NewTab(ctx, "https://example.com", "")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -23,21 +24,55 @@ type Router struct {
 	activeTab string
 	counter   int
 	rod       *RodDriver
+	hub       *ExtHub
 }
 
-func NewRouter(rod *RodDriver) *Router {
-	return &Router{
+func NewRouter(rod *RodDriver, hub *ExtHub) *Router {
+	r := &Router{
 		tabs: make(map[string]tabRef),
 		rod:  rod,
+		hub:  hub,
 	}
+	if hub != nil {
+		hub.SetRouter(r)
+	}
+	return r
 }
 
 func (r *Router) NewTab(ctx context.Context, url string, profile string) (string, PageSummary, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// In Phase 1, only rod backend exists
-	driver := r.rod
+	var driver Driver
+	selectedProfile := profile
+
+	if profile != "" {
+		if r.hub == nil {
+			return "", PageSummary{}, fmt.Errorf("profile '%s' is not online", profile)
+		}
+		if _, ok := r.hub.GetSession(profile); !ok {
+			return "", PageSummary{}, fmt.Errorf("profile '%s' is not online", profile)
+		}
+		driver = NewExtDriver(profile, r.hub)
+	} else {
+		var online []string
+		if r.hub != nil {
+			online = r.hub.OnlineProfiles()
+			sort.Strings(online)
+		}
+		switch len(online) {
+		case 0:
+			// Fallback to rod backend
+			driver = r.rod
+			selectedProfile = ""
+		case 1:
+			selectedProfile = online[0]
+			driver = NewExtDriver(selectedProfile, r.hub)
+		default:
+			return "", PageSummary{}, fmt.Errorf("multiple extension profiles online (%s). Please specify 'profile' in 'browser_new_tab'", strings.Join(online, ", "))
+		}
+	}
+
 	handle, err := driver.NewTab(ctx, url)
 	if err != nil {
 		return "", PageSummary{}, err
@@ -56,7 +91,7 @@ func (r *Router) NewTab(ctx context.Context, url string, profile string) (string
 		tabID:   tabID,
 		driver:  driver,
 		handle:  handle,
-		profile: profile,
+		profile: selectedProfile,
 	}
 
 	r.tabs[tabID] = ref
@@ -334,6 +369,40 @@ func (r *Router) Evaluate(ctx context.Context, tabID, script string) (string, an
 	return ref.tabID, val, nil
 }
 
+func (r *Router) onProfileDisconnected(profile string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for id, ref := range r.tabs {
+		if ref.profile == profile {
+			delete(r.tabs, id)
+			if r.activeTab == id {
+				r.activeTab = ""
+			}
+		}
+	}
+
+	if r.activeTab == "" && len(r.tabs) > 0 {
+		for id := range r.tabs {
+			r.activeTab = id
+			break
+		}
+	}
+}
+
+func (r *Router) countTabsForProfile(profile string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	count := 0
+	for _, ref := range r.tabs {
+		if ref.profile == profile {
+			count++
+		}
+	}
+	return count
+}
+
 func (r *Router) GetStatus(ctx context.Context) string {
 	cdpURL := os.Getenv("CHROME_CDP_URL")
 	if cdpURL == "" {
@@ -351,10 +420,27 @@ func (r *Router) GetStatus(ctx context.Context) string {
 		status += "\n💡 **Tip**: Run `make chrome` to attach to your real Google Chrome!\n"
 	}
 
+	if r.hub != nil {
+		profiles := r.hub.ListProfiles()
+		status += fmt.Sprintf("- **Extension Profiles Online**: %d\n", len(profiles))
+		for _, p := range profiles {
+			emailInfo := ""
+			if p.Email != "" {
+				emailInfo = fmt.Sprintf(" (%s)", p.Email)
+			}
+			status += fmt.Sprintf("  * `[%s]`%s — %d tabs managed (connected %s)\n",
+				p.Profile, emailInfo, p.OpenTabs, p.ConnectedAt.Format("15:04:05"))
+		}
+	}
+
 	tabs, _ := r.ListTabs(ctx)
 	status += fmt.Sprintf("- **Open Tabs Managed**: %d\n", len(tabs))
 	for _, t := range tabs {
-		status += fmt.Sprintf("  * `[%s]` %s (`%s`)\n", t.ID, t.Title, t.URL)
+		profileTag := ""
+		if t.Profile != "" {
+			profileTag = fmt.Sprintf(" [%s]", t.Profile)
+		}
+		status += fmt.Sprintf("  * `[%s]`%s %s (`%s`)\n", t.ID, profileTag, t.Title, t.URL)
 	}
 	return status
 }

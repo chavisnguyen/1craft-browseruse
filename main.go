@@ -21,20 +21,45 @@ import (
 
 var (
 	defaultRodDriver = NewRodDriver()
-	defaultRouter    = NewRouter(defaultRodDriver)
+	defaultExtHub    = NewExtHub(30 * time.Second)
+	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)
 )
 
 func setupMCPServer() *server.MCPServer {
 	s := server.NewMCPServer("browseruse", "1.1.0")
 
+	// 0. list_profiles
+	listProfilesTool := mcp.NewTool("list_profiles",
+		mcp.WithDescription("List online Chrome extension profiles connected to browseruse daemon."),
+	)
+	s.AddTool(listProfilesTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		profiles := defaultExtHub.ListProfiles()
+		if len(profiles) == 0 {
+			return mcp.NewToolResultText("No Chrome extension profiles online. All browser tabs use the standard rod/CDP backend."), nil
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("### Online Extension Profiles (%d)", len(profiles)))
+		for _, p := range profiles {
+			emailStr := ""
+			if p.Email != "" {
+				emailStr = fmt.Sprintf(" (%s)", p.Email)
+			}
+			lines = append(lines, fmt.Sprintf("- **`%s`**%s: %d tabs managed (connected at %s, v%s)",
+				p.Profile, emailStr, p.OpenTabs, p.ConnectedAt.Format("15:04:05"), p.Version))
+		}
+		return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
+	})
+
 	// 1. browser_new_tab
 	newTabTool := mcp.NewTool("browser_new_tab",
 		mcp.WithDescription("Create an isolated new browser tab. Essential for multiple agents to work concurrently without interfering with each other."),
 		mcp.WithString("url", mcp.Description("Optional initial URL to open in the new tab")),
+		mcp.WithString("profile", mcp.Description("Optional Chrome extension profile name (e.g. 'work', 'personal'). Call 'list_profiles' to see online profiles.")),
 	)
 	s.AddTool(newTabTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		url := req.GetString("url", "")
-		tabID, summary, err := defaultRouter.NewTab(ctx, url, "")
+		profile := req.GetString("profile", "")
+		tabID, summary, err := defaultRouter.NewTab(ctx, url, profile)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create new tab: %v", err)), nil
 		}
@@ -238,9 +263,11 @@ func main() {
 	s := setupMCPServer()
 
 	if *sseMode {
-		// Initialize or ensure auth token exists
-		if _, err := GetOrCreateToken(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to initialize auth token: %v\n", err)
+		// Fatal check: auth token is required for extension hub /ext endpoint
+		tok, err := GetOrCreateToken()
+		if err != nil || tok == "" {
+			fmt.Fprintf(os.Stderr, "Fatal: failed to initialize auth token for extension hub: %v\n", err)
+			os.Exit(1)
 		}
 
 		streamableServer := server.NewStreamableHTTPServer(s,
@@ -250,6 +277,7 @@ func main() {
 		mux := http.NewServeMux()
 		mux.Handle("/mcp", streamableServer)
 		mux.Handle("/sse", streamableServer)
+		mux.Handle("/ext", defaultExtHub)
 
 		// Explicitly return 404 for OAuth checks so client immediately knows no auth is needed
 		mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +349,7 @@ func main() {
 		for _, l := range listeners {
 			fmt.Printf("   Listening on http://%s/mcp\n", l.Addr())
 		}
-		fmt.Printf("   Endpoints supported: /mcp, /sse, /\n")
+		fmt.Printf("   Endpoints supported: /mcp, /sse, /ext, /\n")
 
 		// Graceful shutdown handling
 		stopChan := make(chan os.Signal, 1)
