@@ -368,3 +368,60 @@ Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (d
 | Email Chrome đọc được? | API `chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' })` hoạt động bình thường, trả về email nếu profile đã đăng nhập hoặc rỗng nếu chưa đăng nhập | Giữ hiển thị email nếu có |
 | Chrome có khoá extension unpacked? | Chrome không khoá extension unpacked; trên Chrome for Testing tải trực tiếp qua cờ, trên Chrome stable cần bật Developer Mode | Hướng dẫn bật Developer Mode trong README |
 | `windowMode` mặc định chốt là | Chốt mặc định: `dedicated` (cửa sổ riêng) | Cung cấp tuỳ chọn `current` trong trang Options |
+
+---
+
+## 13. Nhật ký triển khai chi tiết từng phase
+
+### Phase 0: An toàn loopback & Xác thực Token
+- **Commit**: `4317632` — `feat: bind dual loopback listeners, add origin check and auth token management (Phase 0)`
+- **Các file thay đổi**:
+  - `Makefile`: cập nhật `build` thành `go build -o $(BIN_PATH) .`, thêm target `make token`.
+  - `auth.go` & `auth_test.go`: quản lý token tại `~/.browseruse/token` (0600), so sánh constant-time `subtle.ConstantTimeCompare`, kiểm tra loopback IP (`IsLoopbackAddr`), whitelist Origin (`IsOriginAllowed`).
+  - `main.go`: lắng nghe đồng thời IPv4 (`127.0.0.1`) và IPv6 (`[::1]`), loại bỏ hoàn toàn việc lắng nghe mở `*:3025`; kiểm tra Origin trên `/mcp` và `/sse`.
+- **Kết quả nghiệm thu**: `lsof -i :3025` không còn `*`, Origin lạ bị chặn HTTP 403, các test xác thực loopback & token chạy xanh 100%.
+
+### Phase 1: Tái cấu trúc Driver & Router (Giữ nguyên 100% hành vi cũ)
+- **Commits**:
+  - `f032e79` — `refactor: extract Driver interface, RodDriver, and Router with characterization tests (Phase 1)`
+  - `ddf50f9` — `fix: restore dead tab auto-recovery, add hermetic TestMain and regression test (Phase 1)`
+- **Các file thay đổi**:
+  - `driver.go`: định nghĩa interface `Driver`, cấu trúc dữ liệu `PageSummary`, `TabInfo`, hàm chuẩn hoá URL `normalizeURL` (bảo toàn `data:`, `file:`, `about:`).
+  - `driver_rod.go`: đóng gói toàn bộ logic go-rod cũ (CDP resolve qua `DevToolsActivePort`, launch Chrome fallback, `findElement` 4 bước, `jsExtractElements`, các khoảng chờ 1s / 200ms).
+  - `router.go`: quản lý bảng `tabs`, số đếm ID, tab active, tự động dọn tab chết (`cleanupDeadTabsLocked`) và phục hồi tạo tab mới nếu tab active bị đóng.
+  - `characterization_test.go`: bộ test đặc tả hành vi rod trên trang `data:` cục bộ (4 dạng selector, evaluate Promise/function, type overwrite, snapshot format).
+  - `router_test.go`: test hồi quy phục hồi tab tự động `TestRouter_TabAutoRecovery`.
+  - `main_test.go`: `TestMain` ép chạy hermetic headless (`CHROME_CDP_URL=none`, `BROWSER_HEADLESS=true`).
+  - `main.go`: chuyển toàn bộ 12 tool MCP sang uỷ quyền qua `Router`.
+- **Kết quả nghiệm thu**: Toàn bộ 12 tool hoạt động trơn tru; test đặc tả và test tự phục hồi tab pass 100%.
+
+### Phase 2: ExtHub & Chọn Profile trên Router
+- **Commit**: `8e56415` — `feat: implement ext_hub, driver_ext, list_profiles tool, and automated tests (Phase 2)`
+- **Các file thay đổi**:
+  - `go.mod` & `go.sum`: tích hợp thư viện WebSocket nhẹ `github.com/coder/websocket v1.8.15`.
+  - `ext_hub.go`: endpoint `/ext`, xác thực Origin `chrome-extension://`, token 64 ký tự hex, quản lý phiên và hồ sơ (profile registry), RPC request/response multiplexing qua `id`, `ping`/`pong`, giới hạn payload 32 MiB (`MaxMessageSize`).
+  - `driver_ext.go`: hiện thực `Driver` qua `ExtHub` (`tabs.create`, `tabs.list`, `tabs.close`, `page.navigate`, `page.snapshot`).
+  - `router.go`: cài đặt 4 quy tắc chọn profile theo mục 2.4 (0 profile online -> rod; 1 online -> tự chọn; $\ge 2$ -> báo lỗi yêu cầu chỉ định; chọn cụ thể profile).
+  - `main.go`: thêm tool `list_profiles`, tham số tuỳ chọn `profile` cho `browser_new_tab`, kiểm tra token bắt buộc khi mở `/ext`.
+  - `ext_hub_test.go` & `router_test.go`: test tự động giả lập extension qua WebSocket, kiểm tra từ chối Origin/token sai, thay thế instance cùng nhãn, huỷ lệnh khi rớt kết nối, payload lớn 5 MB, và 5 ca chọn profile của router.
+- **Kết quả nghiệm thu**: `go test -count=1 ./...` và `go vet ./...` xanh 100%.
+
+### Phase 3: Chrome Extension MV3 & Nghiệm thu Tự động E2E
+- **Commit**: `4fddd53` — `feat: implement MV3 extension bridge and automated E2E verification (Phase 3)`
+- **Các file thay đổi & tạo mới**:
+  - `extension/manifest.json`: Manifest V3, background service worker module, permissions: `tabs`, `scripting`, `debugger`, `storage`, `alarms`, `identity`, `host_permissions: ["<all_urls>"]`.
+  - `extension/background.js`: client WebSocket kết nối `ws://127.0.0.1:3025/ext`, reconnect backoff 1s-30s, keepalive kép (ping 20s + alarm 30s), quản lý dedicated window (1280x900, `focused: false`), các handler `tabs.create`, `tabs.list`, `tabs.close`, `page.navigate`, `page.snapshot`.
+  - `extension/options.html` & `options.js`: giao diện cài đặt nhãn profile, token, daemon URL, chế độ cửa sổ; kiểm tra `chrome.identity.getProfileUserInfo`, hiển thị real-time badge kết nối.
+  - `extension/lib/snapshot.js`: hàm trích xuất phần tử tương tác sao chép 100% logic `jsExtractElements`.
+  - `ext_hub.go` & `driver_ext.go`: tinh chỉnh tương thích hai chiều (hỗ trợ cả `label` lẫn `profile` trong handshake, nhận diện response dạng mảng hoặc object `{tabs: [...]}`).
+- **Các phát hiện kỹ thuật & Fix**:
+  1. *Chrome 156 (macOS stable) chặn `--load-extension`*: Chrome bản chính thức yêu cầu bật Developer Mode thủ công qua UI. Để tự động hoá E2E hoàn toàn trong kiểm thử, sử dụng binary **Chrome for Testing** (`~/.cache/puppeteer/...`) nạp extension qua cờ không bị giới hạn.
+  2. *Lệch schema `HelloMessage`*: `background.js` gửi `label`, Go struct khai báo `profile`. Đã sửa hỗ trợ cả hai trường.
+  3. *Thiếu `type: "res"`*: `background.js` gửi phản hồi thiếu `type: "res"` khiến `ext_hub` bỏ qua và timeout. Đã chuẩn hoá `type: "res"` và thêm fallback nhận diện theo `id` ở hub.
+  4. *Lệch schema `tabs.list`*: `driver_ext.go` unmarshal trực tiếp vào slice trong khi extension trả về `{tabs: [...]}` làm `CheckAlive` hiểu nhầm tab đã chết. Đã sửa hỗ trợ cả 2 định dạng.
+  5. *`waitForTabLoad` timeout trên trang tải nhanh*: Nếu tab đạt trạng thái `complete` trước khi listener kích hoạt thì sự kiện `onUpdated` không bao giờ bắn. Đã bổ sung kiểm tra tức thời `tab.status === 'complete'`.
+- **Kết quả nghiệm thu E2E tự động**:
+  - Extension tự động kết nối và online nhãn `work`.
+  - `list_profiles` liệt kê profile `work` qua MCP.
+  - `browser_new_tab(url="https://example.com")` mở tab trong dedicated window và trích xuất đúng snapshot (`Example Domain`, `- [a] "Learn more"`).
+  - `browser_list_tabs`, `browser_navigate`, `browser_close_tab` chạy thông suốt 100%.
