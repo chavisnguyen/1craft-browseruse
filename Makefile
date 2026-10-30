@@ -62,7 +62,7 @@ status:
 	fi
 	@echo ""
 	@echo "--- Chrome Remote Debugging (Port 9222) ---"
-	@if curl -s http://127.0.0.1:9222/json/version >/dev/null 2>&1; then \
+	@if [ -r "$$HOME/Library/Application Support/Google/Chrome/DevToolsActivePort" ] || curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1; then \
 		echo "🟢 Google Chrome connected on port 9222"; \
 	else \
 		echo "🔴 Chrome port 9222 not active (Run 'make chrome' to attach your real Chrome)"; \

@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,19 +46,58 @@ var mgr = &BrowserManager{
 	pages: make(map[string]*rod.Page),
 }
 
-func (m *BrowserManager) isCDPOpen(url string) bool {
+// resolveCDP returns a control URL for a running Chrome, or "" if none.
+// Classic --remote-debugging-port Chrome serves /json/version over HTTP; Chrome's
+// own profile (chrome://inspect remote debugging) only exposes a websocket whose
+// path is written to DevToolsActivePort.
+func (m *BrowserManager) resolveCDP(url string) string {
+	if strings.HasPrefix(url, "ws://") || strings.HasPrefix(url, "wss://") {
+		return url
+	}
 	client := http.Client{Timeout: 1 * time.Second}
 	resp, err := client.Get(strings.TrimRight(url, "/") + "/json/version")
-	if err == nil && resp.StatusCode == 200 {
+	if err == nil {
 		resp.Body.Close()
-		return true
+		if resp.StatusCode == 200 {
+			return url
+		}
 	}
-	return false
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	portFile := filepath.Join(home, "Library/Application Support/Google/Chrome/DevToolsActivePort")
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		// macOS may block direct reads of the Chrome profile dir; /bin/cat can still succeed
+		data, err = exec.Command("/bin/cat", portFile).Output()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "resolveCDP: cannot read DevToolsActivePort: %v\n", err)
+			return ""
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	return fmt.Sprintf("ws://127.0.0.1:%s%s", strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]))
+}
+
+func (m *BrowserManager) isCDPOpen(url string) bool {
+	return m.resolveCDP(url) != ""
 }
 
 func (m *BrowserManager) ensureBrowser() error {
 	if m.browser != nil {
-		return nil
+		if _, err := m.browser.Version(); err == nil {
+			return nil
+		}
+		// Browser died (e.g. user quit it): drop stale handle and relaunch
+		m.browser = nil
+		m.pages = make(map[string]*rod.Page)
+		m.activeTab = ""
+		m.isCDP = false
 	}
 
 	cdpURL := os.Getenv("CHROME_CDP_URL")
@@ -63,8 +106,8 @@ func (m *BrowserManager) ensureBrowser() error {
 	}
 
 	// Strategy 1: Connect to running Chrome on port 9222 (CDP)
-	if m.isCDPOpen(cdpURL) {
-		b := rod.New().ControlURL(cdpURL)
+	if ctrlURL := m.resolveCDP(cdpURL); ctrlURL != "" {
+		b := rod.New().ControlURL(ctrlURL)
 		if err := b.Connect(); err == nil {
 			m.browser = b
 			m.isCDP = true
@@ -73,7 +116,8 @@ func (m *BrowserManager) ensureBrowser() error {
 	}
 
 	// Strategy 2: Launch Google Chrome directly on macOS
-	headless := os.Getenv("BROWSER_HEADLESS") == "true"
+	// Headless by default so the fallback browser never adds a second Dock icon
+	headless := os.Getenv("BROWSER_HEADLESS") != "false"
 	l := launcher.New().
 		Bin("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").
 		Headless(headless)
@@ -190,6 +234,11 @@ func (m *BrowserManager) CloseTab(tabID string) error {
 				break
 			}
 		}
+		// Last tab closed: shut down a browser we launched ourselves
+		if len(m.pages) == 0 && !m.isCDP && m.browser != nil {
+			_ = m.browser.Close()
+			m.browser = nil
+		}
 		return nil
 	}
 	return fmt.Errorf("tab '%s' not found", tabID)
@@ -236,27 +285,36 @@ func findElement(page *rod.Page, target string) (*rod.Element, error) {
 	target = strings.TrimSpace(target)
 	clean := strings.Trim(target, `"'`)
 
-	// 1. Direct selector (CSS, XPath)
-	el, err := page.Element(target)
+	// Handle Playwright-style :has-text("...")
+	if strings.Contains(target, ":has-text(") {
+		start := strings.Index(target, ":has-text(") + len(":has-text(")
+		end := strings.LastIndex(target, ")")
+		if end > start {
+			clean = strings.Trim(target[start:end], `"'`)
+		}
+	}
+
+	// 1. Direct selector (CSS, XPath) with fast timeout
+	el, err := page.Timeout(2 * time.Second).Element(target)
 	if err == nil && el != nil {
 		return el, nil
 	}
 
 	// 2. Button, Link with matching text
-	el, err = page.ElementR("button, a, [role='button'], [role='link']", clean)
+	el, err = page.Timeout(2 * time.Second).ElementR("button, a, [role='button'], [role='link']", clean)
 	if err == nil && el != nil {
 		return el, nil
 	}
 
 	// 3. Label or placeholder match
 	cssQuery := fmt.Sprintf(`[aria-label*="%s"], [placeholder*="%s"], input[name="%s"]`, clean, clean, clean)
-	el, err = page.Element(cssQuery)
+	el, err = page.Timeout(2 * time.Second).Element(cssQuery)
 	if err == nil && el != nil {
 		return el, nil
 	}
 
 	// 4. Any element with text
-	el, err = page.ElementR("*", clean)
+	el, err = page.Timeout(2 * time.Second).ElementR("*", clean)
 	if err == nil && el != nil {
 		return el, nil
 	}
@@ -639,7 +697,16 @@ func main() {
 
 		// Logging wrapper to trace all incoming requests from agents
 		loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			fmt.Printf("👉 [%s] %s (from %s)\n", r.Method, r.URL.Path, r.RemoteAddr)
+			if r.Method == http.MethodPost {
+				bodyBytes, err := io.ReadAll(r.Body)
+				if err == nil {
+					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+					if strings.Contains(string(bodyBytes), `"notifications/cancelled"`) {
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+				}
+			}
 			mux.ServeHTTP(w, r)
 		})
 
