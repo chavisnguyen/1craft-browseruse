@@ -65,9 +65,23 @@ func (r *Router) NewTab(ctx context.Context, url string, profile string) (string
 	return tabID, summary, nil
 }
 
+func (r *Router) cleanupDeadTabsLocked(ctx context.Context) {
+	for id, ref := range r.tabs {
+		if !ref.driver.CheckAlive(ctx, ref.handle) {
+			delete(r.tabs, id)
+			if r.activeTab == id {
+				r.activeTab = ""
+			}
+		}
+	}
+}
+
 // getTabRefLocked returns tabRef for tabID or active tab without locking.
-// If no tab exists at all, it auto-creates the first tab.
+// It first prunes any closed/dead tabs. If no tab exists at all, it auto-creates the first tab.
 func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, error) {
+	// Clean up any dead tabs first (e.g. closed by user or browser restart)
+	r.cleanupDeadTabsLocked(ctx)
+
 	// 1. Explicit tabID provided
 	if tabID != "" {
 		ref, ok := r.tabs[tabID]
@@ -149,27 +163,18 @@ func (r *Router) ListTabs(ctx context.Context) ([]TabInfo, string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var result []TabInfo
-	// Clean up dead tabs and build list
-	var deadTabs []string
+	r.cleanupDeadTabsLocked(ctx)
 
+	var result []TabInfo
 	for id, ref := range r.tabs {
 		infos, err := ref.driver.ListTabs(ctx, []string{ref.handle})
 		if err != nil || len(infos) == 0 {
-			deadTabs = append(deadTabs, id)
 			continue
 		}
 		info := infos[0]
 		info.ID = id
 		info.Profile = ref.profile
 		result = append(result, info)
-	}
-
-	for _, deadID := range deadTabs {
-		delete(r.tabs, deadID)
-		if r.activeTab == deadID {
-			r.activeTab = ""
-		}
 	}
 
 	if r.activeTab == "" && len(r.tabs) > 0 {

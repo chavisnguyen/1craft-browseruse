@@ -37,6 +37,21 @@ func (d *RodDriver) Name() string {
 	return "rod"
 }
 
+func (d *RodDriver) CheckAlive(ctx context.Context, handle string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	p, ok := d.pages[handle]
+	if !ok {
+		return false
+	}
+	if _, err := p.Info(); err != nil {
+		delete(d.pages, handle)
+		return false
+	}
+	return true
+}
+
 func (d *RodDriver) IsCDP() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -44,6 +59,9 @@ func (d *RodDriver) IsCDP() bool {
 }
 
 func (d *RodDriver) resolveCDP(url string) string {
+	if url == "none" || url == "" {
+		return ""
+	}
 	if strings.HasPrefix(url, "ws://") || strings.HasPrefix(url, "wss://") {
 		return url
 	}

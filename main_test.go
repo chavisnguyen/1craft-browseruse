@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestMain(m *testing.M) {
+	// Force hermetic tests: headless isolated browser, do not attach to user's daily Chrome
+	_ = os.Setenv("CHROME_CDP_URL", "none")
+	_ = os.Setenv("BROWSER_HEADLESS", "true")
+	code := m.Run()
+	defaultRouter.CloseAll(context.Background())
+	os.Exit(code)
+}
+
 func TestExtractElementsJS(t *testing.T) {
 	if !strings.Contains(jsExtractElements, "querySelectorAll") {
 		t.Fatalf("expected jsExtractElements to contain querySelectorAll")
