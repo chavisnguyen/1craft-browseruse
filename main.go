@@ -10,358 +10,19 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/go-rod/rod"
-	"github.com/go-rod/rod/lib/input"
-	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
-const defaultCDPURL = "http://127.0.0.1:9222"
-
-type TabInfo struct {
-	ID    string `json:"tab_id"`
-	Title string `json:"title"`
-	URL   string `json:"url"`
-}
-
-type BrowserManager struct {
-	mu        sync.Mutex
-	browser   *rod.Browser
-	pages     map[string]*rod.Page
-	activeTab string
-	counter   int
-	isCDP     bool
-}
-
-var mgr = &BrowserManager{
-	pages: make(map[string]*rod.Page),
-}
-
-// resolveCDP returns a control URL for a running Chrome, or "" if none.
-// Classic --remote-debugging-port Chrome serves /json/version over HTTP; Chrome's
-// own profile (chrome://inspect remote debugging) only exposes a websocket whose
-// path is written to DevToolsActivePort.
-func (m *BrowserManager) resolveCDP(url string) string {
-	if strings.HasPrefix(url, "ws://") || strings.HasPrefix(url, "wss://") {
-		return url
-	}
-	client := http.Client{Timeout: 1 * time.Second}
-	resp, err := client.Get(strings.TrimRight(url, "/") + "/json/version")
-	if err == nil {
-		resp.Body.Close()
-		if resp.StatusCode == 200 {
-			return url
-		}
-	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	portFile := filepath.Join(home, "Library/Application Support/Google/Chrome/DevToolsActivePort")
-	data, err := os.ReadFile(portFile)
-	if err != nil {
-		// macOS may block direct reads of the Chrome profile dir; /bin/cat can still succeed
-		data, err = exec.Command("/bin/cat", portFile).Output()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "resolveCDP: cannot read DevToolsActivePort: %v\n", err)
-			return ""
-		}
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) < 2 {
-		return ""
-	}
-	return fmt.Sprintf("ws://127.0.0.1:%s%s", strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]))
-}
-
-func (m *BrowserManager) isCDPOpen(url string) bool {
-	return m.resolveCDP(url) != ""
-}
-
-func (m *BrowserManager) ensureBrowser() error {
-	if m.browser != nil {
-		if _, err := m.browser.Version(); err == nil {
-			return nil
-		}
-		// Browser died (e.g. user quit it): drop stale handle and relaunch
-		m.browser = nil
-		m.pages = make(map[string]*rod.Page)
-		m.activeTab = ""
-		m.isCDP = false
-	}
-
-	cdpURL := os.Getenv("CHROME_CDP_URL")
-	if cdpURL == "" {
-		cdpURL = defaultCDPURL
-	}
-
-	// Strategy 1: Connect to running Chrome on port 9222 (CDP)
-	if ctrlURL := m.resolveCDP(cdpURL); ctrlURL != "" {
-		b := rod.New().ControlURL(ctrlURL)
-		if err := b.Connect(); err == nil {
-			m.browser = b
-			m.isCDP = true
-			return nil
-		}
-	}
-
-	// Strategy 2: Launch Google Chrome directly on macOS
-	// Headless by default so the fallback browser never adds a second Dock icon
-	headless := os.Getenv("BROWSER_HEADLESS") != "false"
-	l := launcher.New().
-		Bin("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").
-		Headless(headless)
-
-	controlURL, err := l.Launch()
-	if err != nil {
-		l = launcher.New().Headless(headless)
-		controlURL, err = l.Launch()
-		if err != nil {
-			return fmt.Errorf("failed to launch browser: %w", err)
-		}
-	}
-
-	b := rod.New().ControlURL(controlURL)
-	if err := b.Connect(); err != nil {
-		return fmt.Errorf("failed to connect to launched browser: %w", err)
-	}
-
-	m.browser = b
-	m.isCDP = false
-	return nil
-}
-
-func (m *BrowserManager) NewTab(initialURL string) (*rod.Page, string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if err := m.ensureBrowser(); err != nil {
-		return nil, "", err
-	}
-
-	page := m.browser.MustPage()
-	m.counter++
-	tabID := fmt.Sprintf("tab-%d", m.counter)
-
-	if initialURL != "" {
-		if !strings.HasPrefix(initialURL, "http://") && !strings.HasPrefix(initialURL, "https://") {
-			initialURL = "https://" + initialURL
-		}
-		_ = page.Navigate(initialURL)
-		_ = page.WaitLoad()
-	}
-
-	m.pages[tabID] = page
-	m.activeTab = tabID
-	return page, tabID, nil
-}
-
-func (m *BrowserManager) GetPage(tabID string) (*rod.Page, string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if err := m.ensureBrowser(); err != nil {
-		return nil, "", err
-	}
-
-	// Clean up any pages that were closed by the user
-	for id, p := range m.pages {
-		if _, err := p.Info(); err != nil {
-			delete(m.pages, id)
-			if m.activeTab == id {
-				m.activeTab = ""
-			}
-		}
-	}
-
-	// 1. If explicit tab_id is provided
-	if tabID != "" {
-		if p, ok := m.pages[tabID]; ok {
-			return p, tabID, nil
-		}
-		return nil, "", fmt.Errorf("tab '%s' not found or was closed. Call 'browser_list_tabs' or 'browser_new_tab'", tabID)
-	}
-
-	// 2. If activeTab exists and is valid
-	if m.activeTab != "" {
-		if p, ok := m.pages[m.activeTab]; ok {
-			return p, m.activeTab, nil
-		}
-	}
-
-	// 3. Auto-attach to an existing tab or create a new one
-	if len(m.pages) > 0 {
-		for id, p := range m.pages {
-			m.activeTab = id
-			return p, id, nil
-		}
-	}
-
-	// If no tabs exist, create the first tab
-	page := m.browser.MustPage()
-	m.counter++
-	tabID = fmt.Sprintf("tab-%d", m.counter)
-	m.pages[tabID] = page
-	m.activeTab = tabID
-	return page, tabID, nil
-}
-
-func (m *BrowserManager) CloseTab(tabID string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if tabID == "" {
-		tabID = m.activeTab
-	}
-
-	if p, ok := m.pages[tabID]; ok {
-		_ = p.Close()
-		delete(m.pages, tabID)
-		if m.activeTab == tabID {
-			m.activeTab = ""
-			for id := range m.pages {
-				m.activeTab = id
-				break
-			}
-		}
-		// Last tab closed: shut down a browser we launched ourselves
-		if len(m.pages) == 0 && !m.isCDP && m.browser != nil {
-			_ = m.browser.Close()
-			m.browser = nil
-		}
-		return nil
-	}
-	return fmt.Errorf("tab '%s' not found", tabID)
-}
-
-func (m *BrowserManager) ListTabs() []TabInfo {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	var list []TabInfo
-	for id, p := range m.pages {
-		title := "Unknown"
-		url := "about:blank"
-		if info, err := p.Info(); err == nil {
-			title = info.Title
-			url = info.URL
-		}
-		list = append(list, TabInfo{
-			ID:    id,
-			Title: title,
-			URL:   url,
-		})
-	}
-	return list
-}
-
-func (m *BrowserManager) CloseAll() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for id, p := range m.pages {
-		_ = p.Close()
-		delete(m.pages, id)
-	}
-	if m.browser != nil && !m.isCDP {
-		_ = m.browser.Close()
-	}
-	m.browser = nil
-	m.activeTab = ""
-	m.isCDP = false
-}
-
-func findElement(page *rod.Page, target string) (*rod.Element, error) {
-	target = strings.TrimSpace(target)
-	clean := strings.Trim(target, `"'`)
-
-	// Handle Playwright-style :has-text("...")
-	if strings.Contains(target, ":has-text(") {
-		start := strings.Index(target, ":has-text(") + len(":has-text(")
-		end := strings.LastIndex(target, ")")
-		if end > start {
-			clean = strings.Trim(target[start:end], `"'`)
-		}
-	}
-
-	// 1. Direct selector (CSS, XPath) with fast timeout
-	el, err := page.Timeout(2 * time.Second).Element(target)
-	if err == nil && el != nil {
-		return el, nil
-	}
-
-	// 2. Button, Link with matching text
-	el, err = page.Timeout(2 * time.Second).ElementR("button, a, [role='button'], [role='link']", clean)
-	if err == nil && el != nil {
-		return el, nil
-	}
-
-	// 3. Label or placeholder match
-	cssQuery := fmt.Sprintf(`[aria-label*="%s"], [placeholder*="%s"], input[name="%s"]`, clean, clean, clean)
-	el, err = page.Timeout(2 * time.Second).Element(cssQuery)
-	if err == nil && el != nil {
-		return el, nil
-	}
-
-	// 4. Any element with text
-	el, err = page.Timeout(2 * time.Second).ElementR("*", clean)
-	if err == nil && el != nil {
-		return el, nil
-	}
-
-	return nil, fmt.Errorf("no element found matching '%s'", target)
-}
-
-const jsExtractElements = `() => {
-    const items = [];
-    const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], h1, h2, h3');
-    elements.forEach((el, idx) => {
-        if (idx > 100) return;
-        const rect = el.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
-        const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
-        const tag = el.tagName.toLowerCase();
-        const role = el.getAttribute('role') || tag;
-        if (text || tag === 'input' || tag === 'textarea') {
-            let meta = [];
-            if (el.id) meta.push('id="' + el.id + '"');
-            if (el.name) meta.push('name="' + el.name + '"');
-            if (el.type) meta.push('type="' + el.type + '"');
-            const metaStr = meta.length > 0 ? ' (' + meta.join(' ') + ')' : '';
-            items.push('- [' + role + '] "' + text + '"' + metaStr);
-        }
-    });
-    return items.join('\n');
-}`
-
-func getPageSummary(page *rod.Page, tabID string) string {
-	info, err := page.Info()
-	title := "Unknown"
-	url := "Unknown"
-	if err == nil {
-		title = info.Title
-		url = info.URL
-	}
-
-	res, err := page.Eval(jsExtractElements)
-	elements := ""
-	if err == nil {
-		elements = res.Value.String()
-	}
-
-	return fmt.Sprintf("**Tab ID**: `%s`\n**Current URL**: `%s`\n**Page Title**: %s\n\n**Interactive Elements**:\n```\n%s\n```", tabID, url, title, elements)
-}
+var (
+	defaultRodDriver = NewRodDriver()
+	defaultRouter    = NewRouter(defaultRodDriver)
+)
 
 func setupMCPServer() *server.MCPServer {
 	s := server.NewMCPServer("browseruse", "1.1.0")
@@ -373,12 +34,11 @@ func setupMCPServer() *server.MCPServer {
 	)
 	s.AddTool(newTabTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		url := req.GetString("url", "")
-		page, tabID, err := mgr.NewTab(url)
+		tabID, summary, err := defaultRouter.NewTab(ctx, url, "")
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create new tab: %v", err)), nil
 		}
-		summary := getPageSummary(page, tabID)
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Created new tab `%s`.\n\n%s", tabID, summary)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Created new tab `%s`.\n\n%s", tabID, formatPageSummary(tabID, summary))), nil
 	})
 
 	// 2. browser_list_tabs
@@ -386,7 +46,7 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithDescription("List all active browser tabs currently open, their tab IDs, URLs, and titles."),
 	)
 	s.AddTool(listTabsTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		tabs := mgr.ListTabs()
+		tabs, activeTab := defaultRouter.ListTabs(ctx)
 		if len(tabs) == 0 {
 			return mcp.NewToolResultText("No tabs currently open. Use 'browser_new_tab' or 'browser_navigate' to open one."), nil
 		}
@@ -394,7 +54,7 @@ func setupMCPServer() *server.MCPServer {
 		lines = append(lines, fmt.Sprintf("### Open Tabs (%d)", len(tabs)))
 		for _, t := range tabs {
 			marker := " "
-			if t.ID == mgr.activeTab {
+			if t.ID == activeTab {
 				marker = "⭐ (active)"
 			}
 			lines = append(lines, fmt.Sprintf("- **`%s`** %s: %s — `%s`", t.ID, marker, t.Title, t.URL))
@@ -409,14 +69,11 @@ func setupMCPServer() *server.MCPServer {
 	)
 	s.AddTool(closeTabTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		tabID := req.GetString("tab_id", "")
-		target := tabID
-		if target == "" {
-			target = mgr.activeTab
-		}
-		if err := mgr.CloseTab(tabID); err != nil {
+		closedID, err := defaultRouter.CloseTab(ctx, tabID)
+		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to close tab: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Closed tab `%s`.", target)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Closed tab `%s`.", closedID)), nil
 	})
 
 	// 4. browser_navigate
@@ -429,28 +86,11 @@ func setupMCPServer() *server.MCPServer {
 		url := req.GetString("url", "")
 		tabID := req.GetString("tab_id", "")
 
-		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-			url = "https://" + url
-		}
-
-		page, actualTabID, err := mgr.GetPage(tabID)
+		actualTabID, mode, summary, err := defaultRouter.Navigate(ctx, tabID, url)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
-		}
-
-		if err := page.Navigate(url); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to navigate: %v", err)), nil
 		}
-		_ = page.WaitLoad()
-		time.Sleep(1 * time.Second)
-
-		mode := "Google Chrome (CDP Port 9222)"
-		if !mgr.isCDP {
-			mode = "Standalone Chrome"
-		}
-
-		summary := getPageSummary(page, actualTabID)
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Navigated tab `%s` to `%s` using **%s**.\n\n%s", actualTabID, url, mode, summary)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Navigated tab `%s` to `%s` using **%s**.\n\n%s", actualTabID, normalizeURL(url), mode, formatPageSummary(actualTabID, summary))), nil
 	})
 
 	// 5. browser_snapshot
@@ -460,11 +100,11 @@ func setupMCPServer() *server.MCPServer {
 	)
 	s.AddTool(snapTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		tabID := req.GetString("tab_id", "")
-		page, actualTabID, err := mgr.GetPage(tabID)
+		actualTabID, summary, err := defaultRouter.Snapshot(ctx, tabID)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
 		}
-		return mcp.NewToolResultText(getPageSummary(page, actualTabID)), nil
+		return mcp.NewToolResultText(formatPageSummary(actualTabID, summary)), nil
 	})
 
 	// 6. browser_click
@@ -477,27 +117,11 @@ func setupMCPServer() *server.MCPServer {
 		selector := req.GetString("selector", "")
 		tabID := req.GetString("tab_id", "")
 
-		page, actualTabID, err := mgr.GetPage(tabID)
+		actualTabID, summary, err := defaultRouter.Click(ctx, tabID, selector)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
-		}
-
-		el, err := findElement(page, selector)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Element not found: %v", err)), nil
-		}
-
-		if err := el.ScrollIntoView(); err == nil {
-			time.Sleep(200 * time.Millisecond)
-		}
-
-		if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to click element: %v", err)), nil
 		}
-
-		time.Sleep(1 * time.Second)
-		summary := getPageSummary(page, actualTabID)
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s", selector, actualTabID, summary)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
 	})
 
 	// 7. browser_type
@@ -514,29 +138,10 @@ func setupMCPServer() *server.MCPServer {
 		pressEnter := req.GetBool("press_enter", false)
 		tabID := req.GetString("tab_id", "")
 
-		page, actualTabID, err := mgr.GetPage(tabID)
+		actualTabID, err := defaultRouter.Type(ctx, tabID, selector, text, pressEnter)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
-		}
-
-		el, err := findElement(page, selector)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Element not found: %v", err)), nil
-		}
-
-		if err := el.SelectAllText(); err == nil {
-			_ = el.Input("")
-		}
-
-		if err := el.Input(text); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to type text: %v", err)), nil
 		}
-
-		if pressEnter {
-			_ = page.KeyActions().Press(input.Enter).Do()
-			time.Sleep(1 * time.Second)
-		}
-
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Typed '%s' into `%s` on `%s`.", text, selector, actualTabID)), nil
 	})
 
@@ -547,35 +152,14 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID")),
 	)
 	s.AddTool(keyTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		keyName := strings.ToLower(req.GetString("key", ""))
+		keyName := req.GetString("key", "")
 		tabID := req.GetString("tab_id", "")
 
-		page, actualTabID, err := mgr.GetPage(tabID)
+		actualTabID, err := defaultRouter.PressKey(ctx, tabID, keyName)
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to press key: %v", err)), nil
 		}
-
-		var k input.Key
-		switch keyName {
-		case "enter":
-			k = input.Enter
-		case "tab":
-			k = input.Tab
-		case "escape", "esc":
-			k = input.Escape
-		case "backspace":
-			k = input.Backspace
-		case "arrowdown", "down":
-			k = input.ArrowDown
-		case "arrowup", "up":
-			k = input.ArrowUp
-		default:
-			k = input.Enter
-		}
-
-		_ = page.KeyActions().Press(k).Do()
-		time.Sleep(500 * time.Millisecond)
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Pressed key `%s` on `%s`.", req.GetString("key", ""), actualTabID)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Pressed key `%s` on `%s`.", keyName, actualTabID)), nil
 	})
 
 	// 9. browser_screenshot
@@ -588,25 +172,11 @@ func setupMCPServer() *server.MCPServer {
 		filename := req.GetString("filename", "screenshot.png")
 		tabID := req.GetString("tab_id", "")
 
-		if !strings.HasPrefix(filename, "/") {
-			filename = "/tmp/" + filename
-		}
-
-		page, actualTabID, err := mgr.GetPage(tabID)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
-		}
-
-		data, err := page.Screenshot(false, nil)
+		actualTabID, savedPath, err := defaultRouter.Screenshot(ctx, tabID, filename)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to take screenshot: %v", err)), nil
 		}
-
-		if err := os.WriteFile(filename, data, 0644); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to save screenshot: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(fmt.Sprintf("📸 Screenshot of `%s` saved to `%s`.", actualTabID, filename)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("📸 Screenshot of `%s` saved to `%s`.", actualTabID, savedPath)), nil
 	})
 
 	// 10. browser_evaluate
@@ -619,17 +189,12 @@ func setupMCPServer() *server.MCPServer {
 		script := req.GetString("script", "")
 		tabID := req.GetString("tab_id", "")
 
-		page, actualTabID, err := mgr.GetPage(tabID)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to get tab: %v", err)), nil
-		}
-
-		res, err := page.Eval(script)
+		actualTabID, res, err := defaultRouter.Evaluate(ctx, tabID, script)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Script error: %v", err)), nil
 		}
 
-		valJSON, _ := json.MarshalIndent(res.Value, "", "  ")
+		valJSON, _ := json.MarshalIndent(res, "", "  ")
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Result from `%s`:\n%s", actualTabID, string(valJSON))), nil
 	})
 
@@ -638,28 +203,7 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithDescription("Check Chrome remote debugging port 9222, connection mode, and active tabs."),
 	)
 	s.AddTool(statusTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		cdpURL := os.Getenv("CHROME_CDP_URL")
-		if cdpURL == "" {
-			cdpURL = defaultCDPURL
-		}
-		isOpen := mgr.isCDPOpen(cdpURL)
-
-		status := "### Browser Automation Status (Golang Multi-Agent Engine)\n"
-		if isOpen {
-			status += "- **Chrome CDP (Port 9222)**: 🟢 Connected to Google Chrome\n"
-			status += "- **Mode**: CDP Attached (Shared session & zero extra RAM)\n"
-		} else {
-			status += "- **Chrome CDP (Port 9222)**: 🔴 Not connected (Using standalone Chrome)\n"
-			status += "- **Mode**: Standalone Chrome\n"
-			status += "\n💡 **Tip**: Run `make chrome` to attach to your real Google Chrome!\n"
-		}
-
-		tabs := mgr.ListTabs()
-		status += fmt.Sprintf("- **Open Tabs Managed**: %d\n", len(tabs))
-		for _, t := range tabs {
-			status += fmt.Sprintf("  * `[%s]` %s (`%s`)\n", t.ID, t.Title, t.URL)
-		}
-		return mcp.NewToolResultText(status), nil
+		return mcp.NewToolResultText(defaultRouter.GetStatus(ctx)), nil
 	})
 
 	// 12. browser_close
@@ -667,7 +211,7 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithDescription("Close all tabs and free browser resources."),
 	)
 	s.AddTool(closeTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		mgr.CloseAll()
+		defaultRouter.CloseAll(ctx)
 		return mcp.NewToolResultText("✅ All browser tabs and resources closed."), nil
 	})
 
@@ -796,7 +340,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(ctx)
-		mgr.CloseAll()
+		defaultRouter.CloseAll(context.Background())
 		fmt.Println("👋 Goodbye!")
 	} else {
 		// Run in stdio mode (default)

@@ -270,10 +270,10 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - **Nghiệm thu**: `make build`, `make restart`, `make status` chạy; `lsof -nP -iTCP:3025 -sTCP:LISTEN` chỉ thấy `127.0.0.1` và/hoặc `[::1]`, **không** thấy `*:3025`; `curl http://localhost:3025/mcp` và `curl http://127.0.0.1:3025/mcp` đều tới được server; `curl -H 'Origin: https://evil.example' -X POST http://127.0.0.1:3025/mcp` trả 403; MCP gọi `get_browser_status` vẫn chạy với cấu hình `http://localhost:3025/mcp` cũ. Từ máy khác trong LAN (hoặc `curl` tới IP LAN của máy) kết nối bị từ chối.
 
 ### Phase 1: Tách `Driver` (refactor thuần, không đổi hành vi)
-- [ ] Tạo `driver.go`, `driver_rod.go`, `router.go`; chuyển logic `BrowserManager`, `findElement`, kết nối CDP/launch headless sang `rodDriver`.
-- [ ] Các tool trong `main.go` gọi router.
-- [ ] Giữ nguyên đầu ra văn bản của 12 tool.
-- [ ] **Trước khi refactor**, viết bộ test đặc tả (characterization test) cho `rodDriver` trên trang `data:` URL cục bộ (không cần mạng): `findElement` với 4 dạng selector, `evaluate` dạng hàm và dạng biểu thức, `type` ghi đè nội dung cũ, `snapshot` đúng định dạng. Bộ test này là **chuẩn đối chiếu** để kiểm tra extension ở Phase 4 cho cùng kết quả.
+- [x] Tạo `driver.go`, `driver_rod.go`, `router.go`; chuyển logic `BrowserManager`, `findElement`, kết nối CDP/launch headless sang `rodDriver`.
+- [x] Các tool trong `main.go` gọi router.
+- [x] Giữ nguyên đầu ra văn bản của 12 tool.
+- [x] **Trước khi refactor**, viết bộ test đặc tả (characterization test) cho `rodDriver` trên trang `data:` URL cục bộ (không cần mạng): `findElement` với 4 dạng selector, `evaluate` dạng hàm và dạng biểu thức, `type` ghi đè nội dung cũ, `snapshot` đúng định dạng. Bộ test này là **chuẩn đối chiếu** để kiểm tra extension ở Phase 4 cho cùng kết quả.
 - **Nghiệm thu**: `go build .`, `go vet ./...`; `go test ./...` giữ kết quả như trước (các test cần mạng được phép bỏ qua bằng `t.Skip` khi không có mạng, **không** đổi ý nghĩa); chạy tay 12 tool qua MCP, kết quả giống trước.
 
 ### Phase 2: Hub + giao thức (chưa cần Chrome thật)
