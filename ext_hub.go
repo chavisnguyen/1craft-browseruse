@@ -38,7 +38,7 @@ type HelloMessage struct {
 	Protocol   int    `json:"protocol"`
 	Token      string `json:"token"`
 	Profile    string `json:"profile"`
-	Label      string `json:"label"` // Support "label" per PLAN.md Section 5.1
+	Label      string `json:"label"` // Alias for profile
 	Email      string `json:"email,omitempty"`
 	InstanceID string `json:"instanceId"`
 	Version    string `json:"version,omitempty"`
