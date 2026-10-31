@@ -18,51 +18,86 @@ func getTokenFilePath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home dir: %w", err)
 	}
+	return filepath.Join(home, ".1craft-browseruse", tokenFileName), nil
+}
+
+func getLegacyTokenFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home dir: %w", err)
+	}
 	return filepath.Join(home, ".browseruse", tokenFileName), nil
 }
 
-// GetOrCreateToken returns the existing auth token from ~/.browseruse/token or generates a new one.
-// If BROWSERUSE_TOKEN environment variable is set, it takes highest precedence.
+// GetOrCreateToken returns the existing auth token from ~/.1craft-browseruse/token (or ~/.browseruse/token).
+// If BROWSERUSE_TOKEN or ONECRAFT_BROWSERUSE_TOKEN environment variable is set, it takes highest precedence.
 func GetOrCreateToken() (string, error) {
-	if envTok := strings.TrimSpace(os.Getenv("BROWSERUSE_TOKEN")); envTok != "" {
+	envTok := strings.TrimSpace(os.Getenv("ONECRAFT_BROWSERUSE_TOKEN"))
+	if envTok == "" {
+		envTok = strings.TrimSpace(os.Getenv("BROWSERUSE_TOKEN"))
+	}
+	if envTok != "" {
 		if len(envTok) == 64 {
 			return envTok, nil
 		}
-		return "", fmt.Errorf("BROWSERUSE_TOKEN must be exactly 64 hex characters (got %d)", len(envTok))
+		return "", fmt.Errorf("auth token env must be exactly 64 hex characters (got %d)", len(envTok))
 	}
 
 	tokenPath, err := getTokenFilePath()
 	if err != nil {
 		return "", err
 	}
+	legacyPath, _ := getLegacyTokenFilePath()
 
-	// Try reading existing token
+	// 1. Try reading primary token (~/.1craft-browseruse/token)
 	if data, err := os.ReadFile(tokenPath); err == nil {
 		token := strings.TrimSpace(string(data))
-		if len(token) == 64 { // 32 bytes hex encoded
+		if len(token) == 64 {
 			return token, nil
 		}
 	}
 
-	// Create directory with 0700
-	dir := filepath.Dir(tokenPath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
+	// 2. Try reading legacy token (~/.browseruse/token) and migrate
+	if legacyPath != "" {
+		if data, err := os.ReadFile(legacyPath); err == nil {
+			token := strings.TrimSpace(string(data))
+			if len(token) == 64 {
+				// Migrate to primary directory
+				dir := filepath.Dir(tokenPath)
+				_ = os.MkdirAll(dir, 0700)
+				_ = os.WriteFile(tokenPath, []byte(token+"\n"), 0600)
+				return token, nil
+			}
+		}
 	}
-	_ = os.Chmod(dir, 0700)
 
-	// Generate 32 cryptographically secure random bytes
+	// 3. Generate new 32 cryptographically secure random bytes
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("failed to generate random token: %w", err)
 	}
 	token := hex.EncodeToString(b)
 
-	// Write token with 0600
+	// Write primary token with 0600 in 0700 dir
+	dir := filepath.Dir(tokenPath)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create directory %s: %w", dir, err)
+	}
+	_ = os.Chmod(dir, 0700)
 	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0600); err != nil {
 		return "", fmt.Errorf("failed to write token to %s: %w", tokenPath, err)
 	}
 	_ = os.Chmod(tokenPath, 0600)
+
+	// Also write legacy token for backward compatibility
+	if legacyPath != "" {
+		legacyDir := filepath.Dir(legacyPath)
+		if err := os.MkdirAll(legacyDir, 0700); err == nil {
+			_ = os.Chmod(legacyDir, 0700)
+			_ = os.WriteFile(legacyPath, []byte(token+"\n"), 0600)
+			_ = os.Chmod(legacyPath, 0600)
+		}
+	}
 
 	return token, nil
 }

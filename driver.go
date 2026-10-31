@@ -34,6 +34,7 @@ type Driver interface {
 	Click(ctx context.Context, handle, selector string) error
 	Type(ctx context.Context, handle, selector, text string) error
 	PressKey(ctx context.Context, handle, key string) error
+	Scroll(ctx context.Context, handle, direction string, amount int) error
 	Screenshot(ctx context.Context, handle string) ([]byte, error)
 	Evaluate(ctx context.Context, handle, script string) (any, error)
 	Close() error

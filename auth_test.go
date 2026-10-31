@@ -47,6 +47,36 @@ func TestGetOrCreateToken(t *testing.T) {
 	}
 }
 
+func TestTokenLegacyMigration(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	// Pre-create legacy token in ~/.browseruse/token
+	legacyDir := filepath.Join(tmpDir, ".browseruse")
+	_ = os.MkdirAll(legacyDir, 0700)
+	legacyToken := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	_ = os.WriteFile(filepath.Join(legacyDir, "token"), []byte(legacyToken+"\n"), 0600)
+
+	// Call GetOrCreateToken and verify it returned legacy token and migrated it
+	token, err := GetOrCreateToken()
+	if err != nil {
+		t.Fatalf("GetOrCreateToken failed: %v", err)
+	}
+	if token != legacyToken {
+		t.Errorf("expected legacy token %s, got %s", legacyToken, token)
+	}
+
+	// Verify migrated file in ~/.1craft-browseruse/token exists
+	migratedFile := filepath.Join(tmpDir, ".1craft-browseruse", "token")
+	data, err := os.ReadFile(migratedFile)
+	if err != nil {
+		t.Fatalf("migrated token file does not exist: %v", err)
+	}
+	if string(data) != legacyToken+"\n" {
+		t.Errorf("migrated content mismatch: %q", string(data))
+	}
+}
+
 func TestIsLoopbackAddr(t *testing.T) {
 	tests := []struct {
 		addr string

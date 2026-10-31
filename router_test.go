@@ -251,6 +251,45 @@ func TestRouter_ProfileSelection(t *testing.T) {
 	})
 }
 
+func TestRouter_Scroll(t *testing.T) {
+	ctx := context.Background()
+	rod := NewRodDriver()
+	router := NewRouter(rod, nil)
+	defer router.CloseAll(ctx)
+
+	tabID, _, err := router.NewTab(ctx, "data:text/html,<div style='height:3000px;'>Long Page</div>", "")
+	if err != nil {
+		t.Fatalf("failed to create tab: %v", err)
+	}
+
+	// Test scroll down
+	targetTab, err := router.Scroll(ctx, tabID, "down", 500)
+	if err != nil {
+		t.Fatalf("failed to scroll down: %v", err)
+	}
+	if targetTab != tabID {
+		t.Errorf("expected tab %s, got %s", tabID, targetTab)
+	}
+
+	// Test scroll to top
+	_, err = router.Scroll(ctx, tabID, "top", 0)
+	if err != nil {
+		t.Fatalf("failed to scroll top: %v", err)
+	}
+
+	// Test scroll to bottom
+	_, err = router.Scroll(ctx, tabID, "bottom", 0)
+	if err != nil {
+		t.Fatalf("failed to scroll bottom: %v", err)
+	}
+
+	// Test scroll up
+	_, err = router.Scroll(ctx, tabID, "up", 300)
+	if err != nil {
+		t.Fatalf("failed to scroll up: %v", err)
+	}
+}
+
 type ResultOrErr struct {
 	result json.RawMessage
 	err    error

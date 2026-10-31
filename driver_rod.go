@@ -364,6 +364,29 @@ func (d *RodDriver) PressKey(ctx context.Context, handle, key string) error {
 	return nil
 }
 
+func (d *RodDriver) Scroll(ctx context.Context, handle, direction string, amount int) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+	if amount <= 0 {
+		amount = 500
+	}
+	var js string
+	switch strings.ToLower(direction) {
+	case "up":
+		js = fmt.Sprintf("window.scrollBy({top: -%d, behavior: 'instant'})", amount)
+	case "top":
+		js = "window.scrollTo({top: 0, behavior: 'instant'})"
+	case "bottom":
+		js = "window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'})"
+	default:
+		js = fmt.Sprintf("window.scrollBy({top: %d, behavior: 'instant'})", amount)
+	}
+	_, err = p.Context(ctx).Eval(fmt.Sprintf("() => { %s; return true; }", js))
+	return err
+}
+
 func (d *RodDriver) Screenshot(ctx context.Context, handle string) ([]byte, error) {
 	p, err := d.getPage(handle)
 	if err != nil {

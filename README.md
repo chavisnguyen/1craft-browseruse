@@ -81,6 +81,9 @@ brew install browseruse
 
 # Start the shared background MCP daemon (managed via macOS launchd)
 brew services start browseruse
+
+# Verify health status anytime
+1craft-browseruse doctor
 ```
 
 Get your extension authentication token:
@@ -138,6 +141,7 @@ Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacke
 | `make stop` | Stop the background SSE daemon |
 | `make restart` | Restart the background SSE daemon |
 | `make status` | Check status of the daemon and connected browser instances |
+| `make doctor` | Run full health diagnostics (auth token, daemon reachability, extension path, CDP) |
 | `make token` | Print the current cryptographic authentication token |
 | `make install` | Configure MCP in SSE mode (`http://localhost:3025/mcp`) for all installed agents |
 | `make install-stdio` | Configure MCP in stdio mode (direct binary execution) |
@@ -149,7 +153,7 @@ Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacke
 
 ## 🌐 Available MCP Tools
 
-AI agents connected to 1craft BrowserUse have access to the following 13 tools:
+AI agents connected to 1craft BrowserUse have access to the following 14 tools:
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
@@ -162,6 +166,7 @@ AI agents connected to 1craft BrowserUse have access to the following 13 tools:
 | `browser_click` | `selector` *(string)*<br>`tab_id` *(optional string)* | Clicks an element identified by CSS selector, text match, or snapshot element index. |
 | `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into an input field or textarea, optionally submitting with `Enter`. |
 | `browser_press_key` | `key` *(string)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
+| `browser_scroll` | `direction` *(optional string)*<br>`amount` *(optional int)*<br>`tab_id` *(optional string)* | Scrolls the page (`down`, `up`, `top`, `bottom`) by specified pixels. Essential for reading long articles and infinite feeds. |
 | `browser_screenshot` | `filename` *(optional string)*<br>`tab_id` *(optional string)* | Captures a PNG screenshot of the tab view and returns the local file path. |
 | `browser_evaluate` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
 | `get_browser_status`| *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |

@@ -9,7 +9,7 @@ PID_FILE := daemon.pid
 LOG_FILE := daemon.log
 PORT ?= 3025
 
-.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help setup quickstart
+.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help setup quickstart doctor
 
 all: build
 
@@ -96,6 +96,10 @@ status:
 	else \
 		echo "🔴 Chrome port 9222 not active (Run 'make chrome' to attach your real Chrome)"; \
 	fi
+
+## doctor: Chẩn đoán sức khỏe hệ thống (token, daemon, extension folder, CDP)
+doctor: build
+	@$(BIN_PATH) doctor
 
 ## install: Cấu hình MCP chế độ SSE (khuyên dùng cho nhiều Agent)
 install: build

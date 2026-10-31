@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -20,7 +21,7 @@ import (
 )
 
 var (
-	Version          = "1.2.1"
+	Version          = "1.2.2"
 	defaultRodDriver = NewRodDriver()
 	defaultExtHub    = NewExtHub(30 * time.Second)
 	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)
@@ -228,7 +229,26 @@ func setupMCPServer() *server.MCPServer {
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Result from `%s`:\n%s", actualTabID, string(valJSON))), nil
 	})
 
-	// 11. get_browser_status
+	// 11. browser_scroll
+	scrollTool := mcp.NewTool("browser_scroll",
+		mcp.WithDescription("Scroll the page up, down, to top, or to bottom. Essential for reading long articles, feeds, and tables."),
+		mcp.WithString("direction", mcp.Description("Scroll direction: 'down' (default), 'up', 'top', or 'bottom'")),
+		mcp.WithNumber("amount", mcp.Description("Scroll distance in pixels (default 500, ignored for 'top'/'bottom')")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID")),
+	)
+	s.AddTool(scrollTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		tabID := req.GetString("tab_id", "")
+		direction := req.GetString("direction", "down")
+		amount := req.GetInt("amount", 500)
+
+		actualTabID, err := defaultRouter.Scroll(ctx, tabID, direction, amount)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to scroll tab: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Scrolled tab `%s` (%s by %d px).", actualTabID, direction, amount)), nil
+	})
+
+	// 12. get_browser_status
 	statusTool := mcp.NewTool("get_browser_status",
 		mcp.WithDescription("Check Chrome remote debugging port 9222, connection mode, and active tabs."),
 	)
@@ -275,6 +295,11 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println(tok)
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "doctor" {
+		runDoctor(*port)
 		return
 	}
 
@@ -395,4 +420,65 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func runDoctor(port string) {
+	fmt.Printf("🩺 1craft BrowserUse Doctor (v%s)\n\n", Version)
+
+	// 1. Auth Token
+	tok, err := GetOrCreateToken()
+	if err != nil || tok == "" {
+		fmt.Printf("🔴 Auth Token: Error loading or generating token: %v\n", err)
+	} else {
+		primaryPath, _ := getTokenFilePath()
+		fmt.Printf("🟢 Auth Token: Valid (%s...%s) in %s\n", tok[:8], tok[len(tok)-8:], primaryPath)
+	}
+
+	// 2. HTTP/SSE Daemon status
+	daemonURL := fmt.Sprintf("http://127.0.0.1:%s/mcp", port)
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(daemonURL)
+	if err != nil {
+		fmt.Printf("🔴 Daemon (: %s): Not reachable (%v)\n", port, err)
+		fmt.Printf("   👉 Run 'brew services start browseruse' or 'make daemon' to start the server\n")
+	} else {
+		_ = resp.Body.Close()
+		fmt.Printf("🟢 Daemon (: %s): Running and reachable at %s\n", port, daemonURL)
+	}
+
+	// 3. Chrome Remote Debugging (port 9222)
+	chromeCDP := os.Getenv("CHROME_CDP_URL")
+	if chromeCDP == "" {
+		chromeCDP = defaultCDPURL
+	}
+	isCDP := defaultRodDriver.isCDPOpen(chromeCDP)
+	if isCDP {
+		fmt.Printf("🟢 Chrome CDP (Port 9222): Connected to local Google Chrome\n")
+	} else {
+		fmt.Printf("⚪ Chrome CDP (Port 9222): Port inactive (Extension Bridge or Standalone Chrome active)\n")
+	}
+
+	// 4. Chrome Extension Folder detection
+	home, _ := os.UserHomeDir()
+	extPaths := []string{
+		"/opt/homebrew/share/browseruse/extension",
+		"/opt/homebrew/opt/browseruse/share/browseruse/extension",
+		"/usr/local/share/browseruse/extension",
+		filepath.Join(home, ".1craft-browseruse", "extension"),
+		"extension",
+	}
+	foundExt := ""
+	for _, ep := range extPaths {
+		if fi, err := os.Stat(filepath.Join(ep, "manifest.json")); err == nil && !fi.IsDir() {
+			foundExt = ep
+			break
+		}
+	}
+	if foundExt != "" {
+		fmt.Printf("🟢 Chrome Extension Folder: Found at %s\n", foundExt)
+	} else {
+		fmt.Printf("🟡 Chrome Extension Folder: Not detected in standard paths\n")
+	}
+
+	fmt.Printf("\n✨ Everything looks healthy! Endpoint for AI agents: http://localhost:%s/mcp\n", port)
 }

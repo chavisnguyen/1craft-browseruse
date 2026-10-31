@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 type ExtDriver struct {
@@ -278,6 +279,48 @@ func (d *ExtDriver) PressKey(ctx context.Context, handle, key string) error {
 		"key":   key,
 	})
 	return err
+}
+
+func (d *ExtDriver) Scroll(ctx context.Context, handle, direction string, amount int) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	if amount <= 0 {
+		amount = 500
+	}
+
+	_, err = s.Call(ctx, "page.scroll", map[string]any{
+		"tabId":     tabID,
+		"direction": direction,
+		"amount":    amount,
+	})
+	if err != nil {
+		// Fallback via page.evaluate for backward compatibility with older extension versions
+		var js string
+		switch strings.ToLower(direction) {
+		case "up":
+			js = fmt.Sprintf("window.scrollBy({top: -%d, behavior: 'instant'})", amount)
+		case "top":
+			js = "window.scrollTo({top: 0, behavior: 'instant'})"
+		case "bottom":
+			js = "window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'})"
+		default:
+			js = fmt.Sprintf("window.scrollBy({top: %d, behavior: 'instant'})", amount)
+		}
+		_, evalErr := d.Evaluate(ctx, handle, js)
+		if evalErr == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (d *ExtDriver) Screenshot(ctx context.Context, handle string) ([]byte, error) {

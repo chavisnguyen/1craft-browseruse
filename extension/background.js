@@ -608,6 +608,57 @@ async function handleRequest(msg) {
         return { type: 'res', id, result: {} };
       }
 
+      case 'page.scroll': {
+        const tabId = params.tabId;
+        const direction = (params.direction || 'down').toLowerCase();
+        const amount = params.amount > 0 ? params.amount : 500;
+
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        let js = '';
+        if (direction === 'up') js = `window.scrollBy({top: -${amount}, behavior: 'instant'})`;
+        else if (direction === 'top') js = `window.scrollTo({top: 0, behavior: 'instant'})`;
+        else if (direction === 'bottom') js = `window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'})`;
+        else js = `window.scrollBy({top: ${amount}, behavior: 'instant'})`;
+
+        let scrolled = false;
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        if (hasDebugger) {
+          try {
+            await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+              expression: `(() => { ${js}; return true; })()`,
+              returnByValue: true,
+            });
+            scrolled = true;
+          } catch (e) {
+            console.warn('Debugger scroll failed, trying fallback:', e);
+          }
+        }
+
+        if (!scrolled) {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: (dir, amt) => {
+              if (dir === 'up') window.scrollBy({ top: -amt, behavior: 'instant' });
+              else if (dir === 'top') window.scrollTo({ top: 0, behavior: 'instant' });
+              else if (dir === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+              else window.scrollBy({ top: amt, behavior: 'instant' });
+            },
+            args: [direction, amount],
+          });
+        }
+
+        await sleep(300); // settling time
+        return { type: 'res', id, result: { scrolled: true, direction, amount } };
+      }
+
       case 'page.screenshot': {
         const tabId = params.tabId;
         const tab = await chrome.tabs.get(tabId);

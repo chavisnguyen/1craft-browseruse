@@ -331,6 +331,20 @@ func (r *Router) PressKey(ctx context.Context, tabID, key string) (string, error
 	return ref.tabID, nil
 }
 
+func (r *Router) Scroll(ctx context.Context, tabID, direction string, amount int) (string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+
+	if err := ref.driver.Scroll(ctx, ref.handle, direction, amount); err != nil {
+		return ref.tabID, err
+	}
+	return ref.tabID, nil
+}
+
 func (r *Router) Screenshot(ctx context.Context, tabID, filename string) (string, string, error) {
 	if filename == "" {
 		filename = "screenshot.png"
