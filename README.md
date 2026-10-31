@@ -1,168 +1,219 @@
 # 1craft BrowserUse
+
 > **Control your browser with your AI**
 
-MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ chạy nền **SSE Server (cổng 3025)** hoặc **stdio** cho phép **nhiều Agent dùng song song cùng lúc**.
+[![Go Version](https://img.shields.io/github/go-mod/go-version/chavisnguyen/1craft-browseruse?style=flat-square)](https://golang.org)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+[![RAM Usage](https://img.shields.io/badge/RAM-~12MB-brightgreen?style=flat-square)](README.md)
 
-## 🚀 Tính năng nổi bật
-
-1. **Hỗ trợ đa Agent đồng thời (Multi-Agent Concurrency):**
-   * Chạy nền 1 tiến trình Go duy nhất (`make daemon`).
-   * Quản lý Tab Pool: Nhiều Agent kết nối vào cùng lúc sẽ tự động dùng các Tab độc lập (`tab-1`, `tab-2`...), không bao giờ tranh chấp hay đè thao tác của nhau.
-2. **Siêu nhẹ RAM (~12MB):**
-   * Binary Go tiêu thụ chỉ ~12MB RAM khi chạy daemon phục vụ cho tất cả các Agent.
-3. **Cắm vào Chrome đang mở (Port 9222):**
-   * Toàn bộ các Tab của các Agent đều mở trong cùng một cửa sổ Google Chrome của bạn, dùng chung mọi tài khoản, cookie đã đăng nhập và 0 MB RAM dư thừa.
-4. **Không cần API Key:**
-   * Dùng trực tiếp trí tuệ của Agent (Claude, Gemini, GPT) để phân tích giao diện và ra lệnh.
+**1craft BrowserUse** is an ultra-lightweight (~12MB RAM), blazingly fast [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in **Golang**. It connects AI agents (**Claude Code**, **Antigravity / AGY**, **Cursor**, **OpenCode**, **Kiro**, **Claude Desktop**) directly to your real browser sessions, cookies, logins, and multiple Chrome profiles—**without requiring macOS Full Disk Access** and **without stealing your mouse focus**.
 
 ---
 
-## 🛠 Lệnh Makefile nhanh
+## ⚡ Highlights
 
-| Lệnh | Ý nghĩa |
-| :--- | :--- |
-| `make daemon` | Bật SSE Server ngầm tại `http://localhost:3025/mcp` |
-| `make stop` | Tắt SSE Server ngầm |
-| `make restart` | Khởi động lại Server |
-| `make status` | Kiểm tra trạng thái Server và kết nối Chrome cổng 9222 |
-| `make token` | Lấy auth token để cấu hình kết nối Chrome extension |
-| `make install` | Cài đặt MCP chế độ SSE (`http://localhost:3025/mcp`) vào AGY, Claude Code, OpenCode, Kiro, Claude Desktop |
-| `make install-stdio` | Cài đặt MCP chế độ stdio (chạy binary trực tiếp khi cần) |
-| `make chrome` | Bật Chrome với cổng HTTP 9222 (chỉ cần khi không dùng `chrome://inspect`) |
-| `make test` | Chạy bộ kiểm thử tự động đa Tab |
-| `make clean` | Dọn dẹp binary, file log, pid |
+* **Ultra-Lightweight (~12MB RAM):** Written in pure Go with zero heavy Python or Node runtimes. The background daemon serves multiple AI agents while consuming less than 15MB of memory.
+* **Multi-Agent Concurrency & Tab Pooling:** Run one shared daemon (`make daemon`). When multiple AI agents work at the same time, the server automatically assigns and isolates independent tabs (`tab-1`, `tab-2`...), preventing collisions or race conditions.
+* **No macOS Full Disk Access Needed:** Unlike legacy Chrome CDP setups blocked by macOS TCC permissions when reading `DevToolsActivePort`, the 1craft MV3 Chrome Extension bridge connects over authenticated local WebSockets.
+* **Multi-Profile Isolation (`work`, `personal`...):** Connect multiple Chrome profiles simultaneously. Agents can route tasks to designated profiles (e.g., `browser_new_tab(url, profile="work")`). Profile labels can be customized or auto-derived from your logged-in Google Accounts.
+* **Dedicated Background Window:** Agent tabs run inside an isolated, standardized 1280×900 dedicated window. The AI browses, clicks, and types without interfering with your active personal windows or hijacking your cursor.
+* **Zero API Key Overhead:** Directly leverages your AI agent's native vision and reasoning capabilities via DOM snapshots and element selector maps.
+* **1-Click Quickstart:** Run `make setup` to compile the binary, generate auth tokens, pre-configure the extension, and register the MCP server with all your local agent clients in seconds.
 
 ---
 
-## 🌐 Các Tool cung cấp cho Agent
+## 🏗️ Architecture
 
-* `list_profiles()`: Liệt kê các profile Chrome Extension đang online (nhãn, email nếu có, số tab quản lý).
-* `browser_new_tab(url, profile)`: Mở một Tab mới độc lập (trả về `tab_id`, ví dụ `tab-1`). Hỗ trợ chọn profile extension (ví dụ `work`, `personal`).
-* `browser_list_tabs()`: Liệt kê tất cả các tab đang mở, nhãn profile của từng tab, và tab nào đang active.
-* `browser_close_tab(tab_id)`: Đóng tab cụ thể khi làm xong.
-* `browser_navigate(url, tab_id)`: Mở link trên tab chỉ định (hoặc tab active).
-* `browser_snapshot(tab_id)`: Đọc cấu trúc UI, các nút bấm, ô input của tab.
-* `browser_click(selector, tab_id)`: Bấm vào nút, link trên tab.
-* `browser_type(selector, text, press_enter, tab_id)`: Điền nội dung vào ô input.
-* `browser_press_key(key, tab_id)`: Bấm phím bàn phím trên tab.
-* `browser_screenshot(filename, tab_id)`: Chụp ảnh màn hình của tab lưu file PNG.
-* `browser_evaluate(script, tab_id)`: Thực thi code JavaScript trên tab.
-* `get_browser_status()`: Xem trạng thái hệ thống, danh sách profile extension và các tab đang mở.
-* `browser_close()`: Đóng toàn bộ các tab và tài nguyên do daemon quản lý.
+```mermaid
+flowchart TD
+    subgraph Agents ["AI Coding Agents"]
+        A1["Claude Code"]
+        A2["Antigravity / AGY"]
+        A3["Cursor / OpenCode"]
+    end
+
+    subgraph Daemon ["1craft BrowserUse Daemon (:3025)"]
+        S["SSE / stdio MCP Server (~12MB RAM)"]
+        R["Tab Router & Pool Manager"]
+        H["Authenticated WebSocket Hub (/ext)"]
+        S --> R
+        R --> H
+    end
+
+    subgraph Browser ["Google Chrome Profiles"]
+        E1["Extension: Personal Profile"]
+        E2["Extension: Work Profile"]
+        W1["Dedicated Window (1280x900)"]
+        W2["Dedicated Window (1280x900)"]
+        H <-->|"ws://127.0.0.1:3025/ext"| E1
+        H <-->|"ws://127.0.0.1:3025/ext"| E2
+        E1 --> W1
+        E2 --> W2
+    end
+
+    Agents -->|"MCP HTTP/SSE or stdio"| S
+```
+
+### Backend Resolution Hierarchy
+
+When an agent requests a new tab, the router selects the best available backend in the following order:
+
+| Priority | Backend Engine | Activation Condition | macOS Permissions | Profiles & Cookies | User Experience |
+| :---: | :--- | :--- | :---: | :--- | :--- |
+| **1 (Recommended)** | **Chrome Extension Bridge** | Extension online in Chrome | 🟢 **None (No FDA)** | ✅ All logged-in profiles & cookies (`work`, `personal`) | Standardized 1280×900 dedicated window; zero mouse theft |
+| **2** | **Existing Chrome (CDP)** | `chrome://inspect` enabled; no extension | 🟡 **Full Disk Access** required for terminal | ✅ Primary profile | Direct tabs in your active Chrome window |
+| **3** | **Dedicated Chrome (Port 9222)** | Started via `make chrome` | 🟢 None | ✅ (Main) / ❌ (Isolated) | Separate Chrome instance |
+| **4** | **Fallback Headless Chrome** | None of the above available | 🟢 None | ❌ Ephemeral session (cookies lost on exit) | Headless background process |
 
 ---
 
-## 💡 Hướng dẫn sử dụng hàng ngày
+## 🚀 Quickstart (1-Click Setup)
+
+### Prerequisites
+
+* macOS, Linux, or Windows (WSL)
+* [Go 1.22+](https://golang.org) installed
+* Google Chrome (or Chromium-based browser)
+
+### 1. Run 1-Click Setup
+
+Clone the repository and run:
 
 ```bash
-make daemon     # bật daemon chạy nền (một lần, mọi Agent dùng chung)
-make status     # kiểm tra: daemon 🟢 và Chrome 🟢
+git clone git@github.com:chavisnguyen/1craft-browseruse.git
+cd 1craft-browseruse
+make setup
 ```
-Sau đó mở đồng thời **Claude Code**, **AGY**, hay **Cursor** và ra lệnh duyệt web mà không sợ bị đè thao tác. Endpoint MCP: `http://localhost:3025/mcp`.
+
+This single command will:
+1. Compile the high-performance Go binary (`bin/browseruse`).
+2. Generate a secure, unique authentication token.
+3. Automatically embed the credentials into `extension/default_config.json`.
+4. Register the MCP server (`1craft-browseruse`) across **AGY**, **Claude Code**, **Claude Desktop**, **Cursor**, and **OpenCode**.
+5. Start the background SSE daemon on port `3025`.
+6. Copy the absolute path of the `extension/` directory straight to your clipboard (macOS).
+
+### 2. Load the Extension in Chrome
+
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked**.
+4. Press `Cmd+Shift+G` (macOS), paste from your clipboard (`Cmd+V`), and press `Enter` to select the `extension` folder.
+5. The extension will **connect automatically**—no manual token copy-pasting required!
 
 ---
 
-## 🔌 Server lấy Chrome từ đâu?
+## 🛠️ Makefile Commands
 
-Mỗi lần có Agent gọi tool mở tab, server tìm backend trình duyệt theo thứ tự ưu tiên:
-
-| Thứ tự | Backend | Khi nào kích hoạt | Quyền macOS | Profile & Cookie | Cửa sổ thao tác |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 (Khuyên dùng)** | **Chrome Extension Bridge** | Có profile extension online | 🟢 **Không cần Full Disk Access** | ✅ Đa profile đồng thời (`work`, `personal`...), cookie thật | Cửa sổ riêng (Dedicated), không chiếm chuột/focus |
-| 2 | **Chrome hằng ngày (CDP)** | Bật `chrome://inspect`, không có extension | 🟡 Cần **Full Disk Access** cho terminal | ✅ Profile chính | Cửa sổ Chrome đang dùng |
-| 3 | **Chrome cổng HTTP 9222** | Chạy `make chrome` hoặc `./start-chrome.sh` | 🟢 Không cần | ✅ (main) / ❌ (isolated) | Cửa sổ riêng |
-| 4 | **Chrome Standalone dự phòng** | Không có 3 cách trên | 🟢 Không cần | ❌ Profile tạm (mất cookie khi tắt) | Headless ngầm |
-
----
-
-## 🧩 Cài đặt Chrome Extension (Khuyên dùng)
-
-Cài extension giúp Agent điều khiển Chrome ổn định, **không cần cấp quyền Full Disk Access** và **hỗ trợ nhiều profile cùng lúc**:
-
-1. Lấy mã token xác thực:
-   ```bash
-   make token
-   ```
-2. Mở trình duyệt Chrome trên profile bạn muốn dùng (ví dụ profile cá nhân hoặc profile công việc):
-   * Truy cập `chrome://extensions`.
-   * Bật công tắc **Developer mode** ở góc phải trên.
-   * Bấm **Load unpacked** (Tải tiện ích đã giải nén) và chọn thư mục `extension/` trong repo `browseruse`.
-3. Cấu hình Extension:
-   * Bấm vào biểu tượng extension hoặc chuột phải vào icon tiện ích → **Options** (Tuỳ chọn).
-   * **Profile Label**: Đặt tên nhãn phân biệt (ví dụ: `work`, `personal`, `default`).
-   * **Auth Token**: Dán mã token lấy được từ lệnh `make token` ở Bước 1.
-   * **Chế độ cửa sổ**: Mặc định là `Cửa sổ riêng (Dedicated Window)` giúp Agent chạy tab riêng mà không làm phiền cửa sổ bạn đang lướt web.
-   * Bấm **Lưu & Kết nối**. Trạng thái sẽ chuyển sang 🟢 **Đã kết nối (Online)**.
-4. *(Tuỳ chọn)* Lặp lại các bước trên trên các profile Chrome khác với nhãn khác (`personal`, `client_a`...) nếu muốn Agent làm việc đa profile song song.
-
----
-
-## 👥 Chọn Profile Extension khi làm việc
-
-* **Chỉ có 1 profile online**: Agent gọi `browser_new_tab(url)` sẽ tự động chọn profile đó mà không cần chỉ định.
-* **Có từ 2 profile online trở lên**:
-  * Agent hoặc bạn chỉ định rõ profile khi mở tab:
-    ```
-    browser_new_tab(url="https://mail.google.com", profile="work")
-    ```
-  * Nếu không chỉ định `profile`, tool sẽ báo lỗi thân thiện liệt kê tất cả các profile đang online để Agent chọn lại.
-* **Xem danh sách profile online**: Gọi tool `list_profiles()` hoặc `get_browser_status()`.
-
----
-
-## ⚖️ Bảng so sánh các Backend
-
-| Tiêu chí | Chrome Extension Bridge | Chrome hằng ngày (CDP 9222) | Standalone Chrome |
-| :--- | :--- | :--- | :--- |
-| **Quyền macOS** | 🟢 Không cần Full Disk Access | 🔴 Bắt buộc Full Disk Access | 🟢 Không cần |
-| **Đa profile đồng thời** | 🟢 Hỗ trợ song song nhiều profile (`work`, `personal`...) | 🔴 Chỉ 1 profile | 🔴 Không hỗ trợ |
-| **Đăng nhập & Cookie** | 🟢 Đầy đủ tài khoản, cookie của từng profile | 🟢 Đầy đủ tài khoản của profile chính | 🔴 Profile rỗng, mất khi tắt |
-| **Trải nghiệm dùng** | 🟢 Mở cửa sổ riêng kích thước chuẩn 1280x900, không cướp focus chuột | 🟡 Mở tab trực tiếp trong cửa sổ Chrome bạn đang lướt | ⚪ Chạy ngầm headless |
-| **Tính ổn định** | 🟢 Không phụ thuộc format file `DevToolsActivePort` | 🟡 Dễ lệch port khi Chrome tự cập nhật | 🟢 Ổn định nhưng không có cookie |
-
----
-
-### Cài đặt dự phòng qua CDP (Nếu không dùng Extension)
-
-Chrome hiện tại (136+) chỉ cho Agent nối vào profile hằng ngày qua cơ chế remote debugging riêng, không còn endpoint HTTP `/json/version` (trả `404`).
-
-1. Mở `chrome://inspect/#remote-debugging` trong Chrome, **bật công tắc**. Nếu Chrome hiện hộp thoại xin phép khi Agent kết nối, bấm Allow.
-2. Cấp quyền đọc profile Chrome cho terminal chạy daemon, vì macOS chặn đọc file `~/Library/Application Support/Google/Chrome/DevToolsActivePort`:
-   * System Settings → Privacy & Security → **Full Disk Access** → bật cho app terminal bạn dùng (Terminal, iTerm, cmux...).
-   * **Thoát hẳn** terminal (Cmd+Q) rồi mở lại.
-   * Kiểm tra: `cat ~/Library/Application\ Support/Google/Chrome/DevToolsActivePort` phải in ra 2 dòng (port và `/devtools/browser/<id>`).
-3. Chạy `make restart && make status`, phải thấy cả 🟢 daemon và 🟢 Chrome.
-4. Trong Claude Code gõ `/mcp` và Reconnect `browseruse` nếu cần.
-
-Server tự đọc lại `DevToolsActivePort` ở mỗi lần dùng, nên Chrome khởi động lại (id websocket đổi) cũng không cần cấu hình lại.
-
-### Biến môi trường
-
-| Biến | Ý nghĩa |
+| Command | Description |
 | :--- | :--- |
-| `CHROME_CDP_URL` | Địa chỉ Chrome. Mặc định `http://127.0.0.1:9222`. Nhận cả `ws://127.0.0.1:9222/devtools/browser/<id>` nếu không đọc được `DevToolsActivePort` |
-| `BROWSER_HEADLESS` | Chỉ ảnh hưởng Chrome tự launch (cách 3). Mặc định headless. Đặt `false` để thấy cửa sổ (sẽ có thêm icon Dock) |
+| `make setup` | **1-Click zero-config setup**: compiles binary, sets up tokens, installs MCP, and launches daemon |
+| `make daemon` | Start the MCP SSE server in the background at `http://localhost:3025/mcp` |
+| `make stop` | Stop the background SSE daemon |
+| `make restart` | Restart the background SSE daemon |
+| `make status` | Check status of the daemon and connected browser instances |
+| `make token` | Print the current cryptographic authentication token |
+| `make install` | Configure MCP in SSE mode (`http://localhost:3025/mcp`) for all installed agents |
+| `make install-stdio` | Configure MCP in stdio mode (direct binary execution) |
+| `make chrome` | Launch Chrome with remote debugging on port 9222 (optional legacy CDP fallback) |
+| `make test` | Run the full automated integration and multi-tab test suite |
+| `make clean` | Remove compiled binaries, temporary logs, and PID files |
 
 ---
 
-## 🧯 Xử lý sự cố
+## 🌐 Available MCP Tools
 
-| Triệu chứng | Nguyên nhân / Cách sửa |
-| :--- | :--- |
-| Extension Options báo "Chưa kết nối" / Badge `!` đỏ | Daemon chưa chạy hoặc token không đúng. Chạy `make daemon`, sau đó chạy `make token` và dán lại token chính xác vào Options của extension rồi bấm Lưu. |
-| Thanh vàng *"browseruse started debugging this browser"* | Cảnh báo tiêu chuẩn của Chrome khi extension kết nối điều khiển tab qua `chrome.debugger`. Hoàn toàn bình thường và an toàn. |
-| Báo lỗi *"multiple extension profiles online"* | Đang có từ 2 profile extension online cùng lúc. Cần truyền thêm tham số `profile` trong `browser_new_tab(url="...", profile="work")`. |
-| Báo lỗi *"label_in_use"* | Hai instance extension cấu hình cùng một nhãn profile. Hãy mở Options và đổi tên nhãn phân biệt (ví dụ `work`, `personal`). |
-| `get_browser_status` báo 🔴 "Standalone Chrome" | Không có extension online và server không nối được Chrome hằng ngày qua CDP. Kiểm tra: extension đã nạp và online chưa, hoặc công tắc `chrome://inspect/#remote-debugging` còn bật không và terminal có Full Disk Access chưa. Log: `daemon.log`. |
-| `operation not permitted` khi đọc `DevToolsActivePort` | macOS chặn đọc profile Chrome khi dùng backend CDP cũ. Cách tốt nhất: dùng Chrome Extension để không cần Full Disk Access. Nếu vẫn muốn dùng CDP, cấp Full Disk Access cho terminal rồi Cmd+Q mở lại. |
-| Hai icon Chrome trong Dock | Từng xảy ra khi server tự launch Chrome không headless. Bản hiện tại mặc định headless; nếu còn sót thì `pkill -f "rod/user-data"` hoặc `make restart` |
-| `curl http://127.0.0.1:9222/json/version` trả `404` | Bình thường với Chrome hằng ngày bật qua `chrome://inspect`; server không dùng endpoint này |
-| MCP báo `ECONNREFUSED` trong Claude Code / AGY | Daemon đã tắt (thoát terminal, tắt máy...). Chạy `make daemon` rồi Reconnect MCP |
-| Lỗi biên dịch khi phát triển | Chạy `go build .` hoặc `make build` để biên dịch toàn bộ package main (gồm nhiều file Go). |
-| Đăng nhập mất khi Chrome bị tắt | Server rơi về Chrome headless dự phòng (profile trống). Khởi động lại Chrome/Extension, các lần gọi sau tự nối lại |
+AI agents connected to 1craft BrowserUse have access to the following 13 tools:
+
+| Tool | Parameters | Description |
+| :--- | :--- | :--- |
+| `list_profiles` | *none* | Lists all currently connected Chrome Extension profiles (label, signed-in email, active tab count). |
+| `browser_new_tab` | `url` *(string)*<br>`profile` *(optional string)* | Opens a new independent browser tab and returns its `tab_id` (e.g. `tab-1`) and page summary. Supports targeting profiles (e.g. `work`). |
+| `browser_list_tabs` | *none* | Lists all active tabs, their assigned profile tags, URLs, page titles, and the current active tab marker. |
+| `browser_close_tab` | `tab_id` *(string)* | Closes a specific tab when the agent finishes its task. |
+| `browser_navigate` | `url` *(string)*<br>`tab_id` *(optional string)* | Navigates the specified (or active) tab to a new URL. |
+| `browser_snapshot` | `tab_id` *(optional string)* | Extracts an interactive accessibility DOM tree with clickable elements, inputs, buttons, and selector IDs. |
+| `browser_click` | `selector` *(string)*<br>`tab_id` *(optional string)* | Clicks an element identified by CSS selector, text match, or snapshot element index. |
+| `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into an input field or textarea, optionally submitting with `Enter`. |
+| `browser_press_key` | `key` *(string)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
+| `browser_screenshot` | `filename` *(optional string)*<br>`tab_id` *(optional string)* | Captures a PNG screenshot of the tab view and returns the local file path. |
+| `browser_evaluate` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
+| `get_browser_status`| *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |
+| `browser_close` | *none* | Closes all managed tabs and releases associated browser resources. |
 
 ---
 
-## ⚠️ Lưu ý bảo mật
+## 👥 Multi-Profile Usage & Agent Prompting
 
-Khi nối vào Chrome hằng ngày, Agent thao tác bằng **chính tài khoản và cookie đang đăng nhập của bạn**. Chỉ giao cho Agent những việc bạn chấp nhận để nó làm dưới danh nghĩa mình. Muốn tách biệt, dùng profile riêng: `./start-chrome.sh isolated` (profile `~/.chrome-ai-profile`, cổng 9222, cần Chrome hằng ngày chưa chiếm cổng đó).
+You can run the extension across multiple Google Chrome profiles simultaneously (e.g. your personal profile, company work profile, or separate staging accounts).
+
+### Automatic Profile Labeling
+
+When the extension is loaded into a profile signed in with a Google Account, 1craft BrowserUse automatically derives a human-friendly profile label:
+* `user@gmail.com` ➔ `gmail_user`
+* `alice@company.com` ➔ `company_alice`
+
+You can also customize the label at any time in **Extension Options**.
+
+### Prompting Examples
+
+* **Single Profile Connected:**
+  Agents automatically route tabs to the single online profile without requiring explicit parameters.
+* **Multiple Profiles Connected:**
+  Agents can specify the target profile when creating tabs:
+  ```text
+  "Open my company dashboard in the work profile and download the weekly sales report."
+  ```
+  The agent will invoke:
+  ```json
+  browser_new_tab({"url": "https://dashboard.internal", "profile": "work"})
+  ```
+* If multiple profiles are connected and no profile is specified, the server responds with a descriptive message listing all available profile labels so the agent can self-correct.
+
+---
+
+## ⚙️ Configuration & Environment Variables
+
+Configuration can be specified via environment variables or a local `.env` file in the project root:
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `PORT` | `3025` | Port for the HTTP/SSE MCP daemon and WebSocket hub. |
+| `CHROME_CDP_URL` | `http://127.0.0.1:9222` | Fallback CDP endpoint (used when Extension Bridge is not connected). |
+| `BROWSER_HEADLESS` | `true` | Headless mode for fallback standalone Chrome. Set to `false` to show GUI. |
+
+---
+
+## 🧯 Troubleshooting
+
+### Extension status shows "Disconnected" or red exclamation badge
+* Ensure the daemon is running (`make daemon`).
+* Verify the auth token: run `make token`, open **Extension Options**, paste the token, and click **Save & Connect**.
+
+### Chrome displays yellow banner: *"1craft BrowserUse started debugging this browser"*
+* This is a standard Google Chrome security alert when an extension connects to a tab via `chrome.debugger`. It is completely normal, expected, and safe.
+
+### Agent reports *"multiple extension profiles online"*
+* Two or more Chrome profiles are connected. Instruct your agent to specify which profile to use (e.g., `profile="work"` or `profile="gmail_user"`), or check online profiles with `list_profiles()`.
+
+### Agent reports *"label_in_use"*
+* Two Chrome windows/profiles are configured with the identical profile label. Open **Extension Options** in one of them and give it a unique name.
+
+### macOS `operation not permitted` when reading `DevToolsActivePort`
+* This only occurs when using the legacy CDP fallback without the extension. The recommended fix is to load the **1craft Chrome Extension**, which requires **no Full Disk Access**. If you must use legacy CDP, grant Full Disk Access to your terminal app in *System Settings → Privacy & Security → Full Disk Access*.
+
+---
+
+## 🔒 Security & Privacy
+
+* **Strict Loopback Binding:** The daemon and WebSocket hub bind exclusively to `127.0.0.1` and `[::1]`. No external network exposure.
+* **Cryptographic Authentication:** WebSocket connections from the Chrome extension require a cryptographically generated token stored locally with restricted permissions (`0600`).
+* **Origin Verification:** All incoming WebSocket connections validate the `Origin` header against valid Chrome Extension IDs (`chrome-extension://*`).
+* **Zero Telemetry / 100% Local:** No logs, browsing activity, cookies, or prompt data are transmitted to any external servers. Everything executes on your machine.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
