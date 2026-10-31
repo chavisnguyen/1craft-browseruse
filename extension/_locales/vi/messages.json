@@ -1,10 +1,10 @@
 {
   "extName": {
-    "message": "browseruse bridge",
+    "message": "1craft BrowserUse",
     "description": "Tên tiện ích"
   },
   "extDesc": {
-    "message": "Cầu nối Chrome extension cho browseruse MCP daemon",
+    "message": "Control your browser with your AI - Cầu nối Chrome cho 1craft BrowserUse MCP daemon",
     "description": "Mô tả tiện ích"
   },
   "statusConnected": {
@@ -50,7 +50,7 @@
     "message": "Tên gồm 1-32 ký tự (chữ cái, số, ., _, -)"
   },
   "optionsTitle": {
-    "message": "Cài đặt browseruse bridge"
+    "message": "Cài đặt 1craft BrowserUse"
   },
   "daemonToken": {
     "message": "Mã xác thực daemon"

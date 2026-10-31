@@ -1,10 +1,10 @@
 {
   "extName": {
-    "message": "browseruse bridge",
+    "message": "1craft BrowserUse",
     "description": "Extension name"
   },
   "extDesc": {
-    "message": "Chrome extension bridge for browseruse MCP daemon",
+    "message": "Control your browser with your AI - Chrome bridge for 1craft BrowserUse MCP daemon",
     "description": "Extension description"
   },
   "statusConnected": {
@@ -50,7 +50,7 @@
     "message": "Name must be 1-32 chars (alphanumeric, ., _, -)"
   },
   "optionsTitle": {
-    "message": "browseruse bridge settings"
+    "message": "1craft BrowserUse settings"
   },
   "daemonToken": {
     "message": "Daemon token"

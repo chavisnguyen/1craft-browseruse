@@ -1,5 +1,5 @@
 # ========================================================
-# browseruse MCP Server (Golang Multi-Agent Engine)
+# 1craft BrowserUse (Control your browser with your AI)
 # ========================================================
 
 BIN_DIR := bin

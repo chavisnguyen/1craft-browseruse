@@ -26,7 +26,7 @@ var (
 )
 
 func setupMCPServer() *server.MCPServer {
-	s := server.NewMCPServer("browseruse", "1.2.0")
+	s := server.NewMCPServer("1craft-browseruse", "1.2.0")
 
 	// 0. list_profiles
 	listProfilesTool := mcp.NewTool("list_profiles",

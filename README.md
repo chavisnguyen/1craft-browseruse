@@ -1,4 +1,5 @@
-# browseruse MCP Server (Golang Multi-Agent Engine)
+# 1craft BrowserUse
+> **Control your browser with your AI**
 
 MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ chạy nền **SSE Server (cổng 3025)** hoặc **stdio** cho phép **nhiều Agent dùng song song cùng lúc**.
 
