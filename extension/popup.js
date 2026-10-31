@@ -24,19 +24,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // 2. Load email
-  if (data.email) {
+  if (chrome.identity && chrome.identity.getProfileUserInfo) {
+    try {
+      chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, (info) => {
+        if (info && info.email) {
+          emailVal.textContent = info.email;
+          chrome.storage.local.set({ email: info.email });
+        } else if (data.email) {
+          emailVal.textContent = data.email;
+        } else {
+          emailVal.textContent = 'Chưa nhận diện';
+        }
+      });
+    } catch {
+      if (data.email) emailVal.textContent = data.email;
+    }
+  } else if (data.email) {
     emailVal.textContent = data.email;
-  } else if (chrome.identity && chrome.identity.getProfileUserInfo) {
-    chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, (info) => {
-      if (info && info.email) {
-        emailVal.textContent = info.email;
-        chrome.storage.local.set({ email: info.email });
-      } else {
-        emailVal.textContent = 'Chưa đăng nhập';
-      }
-    });
   } else {
-    emailVal.textContent = 'Chưa đăng nhập';
+    emailVal.textContent = 'Chưa nhận diện';
   }
 
   // 3. Refresh status and active tabs
