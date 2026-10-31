@@ -22,7 +22,7 @@ const (
 	MaxMessageSize  = 32 << 20 // 32 MiB read limit for base64 screenshots
 )
 
-var labelRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+var labelRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,31}$`)
 
 type ProfileInfo struct {
 	Profile     string    `json:"profile"`
@@ -316,7 +316,7 @@ func (h *ExtHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Profile label format check
 	if !labelRegex.MatchString(hello.Profile) {
-		_ = h.sendHelloError(conn, "bad_label", "profile label must match regex ^[a-z0-9][a-z0-9_-]{0,31}$")
+		_ = h.sendHelloError(conn, "bad_label", "profile label must match regex ^[a-z0-9][a-z0-9_.-]{0,31}$")
 		return
 	}
 

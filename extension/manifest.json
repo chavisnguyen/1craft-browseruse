@@ -20,6 +20,7 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "browseruse bridge"
+    "default_title": "browseruse bridge",
+    "default_popup": "popup.html"
   }
 }

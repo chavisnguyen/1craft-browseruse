@@ -98,9 +98,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const daemonUrl = daemonUrlInput.value.trim();
     const windowMode = windowModeSelect.value;
 
-    const labelRegex = /^[a-zA-Z0-9_-]{1,32}$/;
+    const labelRegex = /^[a-zA-Z0-9_.-]{1,32}$/;
     if (!labelRegex.test(label)) {
-      showAlert('Tên hồ sơ không hợp lệ (1-32 ký tự alphanumeric, _, -)', true);
+      showAlert('Tên hồ sơ không hợp lệ (1-32 ký tự alphanumeric, ., _, -)', true);
       return;
     }
 

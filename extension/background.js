@@ -31,6 +31,22 @@ function setBadge(text, color) {
   }
 }
 
+// Map key string to CDP Key details
+export function deriveLabelFromEmail(email) {
+  if (!email || !email.includes('@')) return '';
+  const parts = email.trim().toLowerCase().split('@');
+  const user = parts[0];
+  const domainFull = parts[1] || '';
+  const domain = domainFull.split('.')[0];
+  if (!domain || !user) return '';
+  let candidate = `${domain}_${user}`;
+  candidate = candidate.replace(/[^a-z0-9_.-]/g, '_');
+  if (candidate.length > 32) {
+    candidate = candidate.slice(0, 32);
+  }
+  return candidate;
+}
+
 // Configuration loader
 async function getConfig() {
   const data = await chrome.storage.local.get([
@@ -39,6 +55,7 @@ async function getConfig() {
     'daemonUrl',
     'windowMode',
     'instanceId',
+    'email',
   ]);
 
   let label = (data.label || '').trim();
@@ -54,7 +71,9 @@ async function getConfig() {
         const def = await resp.json();
         if (def.token) {
           token = (def.token || '').trim();
-          label = label || (def.label || 'default').trim();
+          if (!label) {
+            label = (def.label || 'default').trim();
+          }
           daemonUrl = (def.daemonUrl || daemonUrl).trim();
           windowMode = def.windowMode || windowMode;
           await chrome.storage.local.set({ label, token, daemonUrl, windowMode });
@@ -62,6 +81,28 @@ async function getConfig() {
       }
     } catch {
       // ignore if default_config.json doesn't exist
+    }
+  }
+
+  // Auto-derive label from Chrome signed-in email if label is empty or default
+  if (!label || label === 'default') {
+    try {
+      if (chrome.identity && chrome.identity.getProfileUserInfo) {
+        const info = await new Promise((resolve) => {
+          chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, (res) => {
+            resolve(res);
+          });
+        });
+        if (info && info.email) {
+          const derived = deriveLabelFromEmail(info.email);
+          if (derived) {
+            label = derived;
+            await chrome.storage.local.set({ label, email: info.email });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not derive label from email:', e);
     }
   }
 
@@ -795,6 +836,11 @@ async function connect() {
       setBadge('!', '#e74c3c');
       stopPing();
       const code = msg.code || msg.error;
+      if (code === 'label_in_use') {
+        if (chrome.runtime.openOptionsPage) {
+          chrome.runtime.openOptionsPage();
+        }
+      }
       // Fatal handshake errors: don't loop endlessly
       if (
         code === 'bad_token' ||
@@ -890,6 +936,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
   } else if (req.type === 'getStatus') {
     sendResponse({
       connected: ws && ws.readyState === WebSocket.OPEN,
+      activeTabIds: Array.from(agentTabIds),
     });
   }
   return true;

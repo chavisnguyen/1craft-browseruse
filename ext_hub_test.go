@@ -145,6 +145,37 @@ func TestExtHub_Handshake_Rejections(t *testing.T) {
 			}
 		}
 	})
+
+	// 1e. Valid Label with dot (e.g. company_chavis.work)
+	t.Run("ValidLabelWithDot", func(t *testing.T) {
+		opts := &websocket.DialOptions{
+			HTTPHeader: http.Header{"Origin": []string{"chrome-extension://test-ext-id"}},
+		}
+		conn, _, err := websocket.Dial(ctx, wsURL, opts)
+		if err != nil {
+			t.Fatalf("dial failed: %v", err)
+		}
+		defer conn.Close(websocket.StatusNormalClosure, "")
+
+		hello, _ := json.Marshal(HelloMessage{
+			Type:       "hello",
+			Protocol:   1,
+			Token:      validToken,
+			Profile:    "company_chavis.work",
+			InstanceID: "inst-dot-1",
+		})
+		_ = conn.Write(ctx, websocket.MessageText, hello)
+
+		_, data, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("read failed: %v", err)
+		}
+		var okMsg HelloOkMessage
+		_ = json.Unmarshal(data, &okMsg)
+		if okMsg.Type != "hello_ok" || okMsg.Profile != "company_chavis.work" {
+			t.Errorf("expected hello_ok with profile 'company_chavis.work', got %+v", okMsg)
+		}
+	})
 }
 
 // 2. Duplicate Label: Same instance replaces, different instance rejected with label_in_use
