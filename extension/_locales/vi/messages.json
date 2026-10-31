@@ -1,0 +1,82 @@
+{
+  "extName": {
+    "message": "browseruse bridge",
+    "description": "Tên tiện ích"
+  },
+  "extDesc": {
+    "message": "Cầu nối Chrome extension cho browseruse MCP daemon",
+    "description": "Mô tả tiện ích"
+  },
+  "statusConnected": {
+    "message": "Đang kết nối"
+  },
+  "statusDisconnected": {
+    "message": "Chưa kết nối"
+  },
+  "profileLabel": {
+    "message": "Tên hồ sơ"
+  },
+  "profilePlaceholder": {
+    "message": "vd: company_user hoặc personal"
+  },
+  "save": {
+    "message": "Lưu"
+  },
+  "saved": {
+    "message": "Đã lưu"
+  },
+  "saving": {
+    "message": "Đang lưu..."
+  },
+  "account": {
+    "message": "Tài khoản"
+  },
+  "localProfile": {
+    "message": "Hồ sơ cục bộ"
+  },
+  "activeTabs": {
+    "message": "Tab đang mở"
+  },
+  "settings": {
+    "message": "Cài đặt"
+  },
+  "reconnect": {
+    "message": "Kết nối lại"
+  },
+  "reconnecting": {
+    "message": "Đang kết nối lại..."
+  },
+  "invalidLabel": {
+    "message": "Tên gồm 1-32 ký tự (chữ cái, số, ., _, -)"
+  },
+  "optionsTitle": {
+    "message": "Cài đặt browseruse bridge"
+  },
+  "daemonToken": {
+    "message": "Mã xác thực daemon"
+  },
+  "daemonTokenHelp": {
+    "message": "Mã token gồm 64 ký tự hex từ ~/.browseruse/token"
+  },
+  "daemonUrl": {
+    "message": "Địa chỉ daemon"
+  },
+  "windowMode": {
+    "message": "Chế độ cửa sổ"
+  },
+  "windowModeDedicated": {
+    "message": "Cửa sổ riêng (Khuyên dùng)"
+  },
+  "windowModeCurrent": {
+    "message": "Cửa sổ hiện tại"
+  },
+  "windowModeHelp": {
+    "message": "Mở tab trong cửa sổ riêng để không ảnh hưởng thao tác chuột của bạn."
+  },
+  "instanceId": {
+    "message": "ID phiên"
+  },
+  "savedSettings": {
+    "message": "Đã lưu cấu hình và kết nối lại."
+  }
+}

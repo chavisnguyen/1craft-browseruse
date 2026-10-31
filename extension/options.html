@@ -1,149 +1,191 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
   <meta charset="UTF-8">
-  <title>Cài đặt browseruse bridge</title>
+  <title>browseruse bridge</title>
   <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
-      padding: 24px;
+      padding: 32px 16px;
       background-color: #f8f9fa;
-      color: #212529;
+      color: #202124;
+      -webkit-font-smoothing: antialiased;
     }
     .container {
-      max-width: 520px;
+      max-width: 480px;
       margin: 0 auto;
       background: #ffffff;
       padding: 24px;
+      border: 1px solid #dadce0;
       border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     }
     h2 {
       margin-top: 0;
-      font-size: 1.25rem;
-      border-bottom: 1px solid #e9ecef;
-      padding-bottom: 12px;
+      font-size: 16px;
+      font-weight: 500;
+      color: #202124;
+      border-bottom: 1px solid #f1f3f4;
+      padding-bottom: 14px;
+      margin-bottom: 20px;
     }
     .form-group {
       margin-bottom: 16px;
     }
     label {
       display: block;
-      margin-bottom: 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
+      margin-bottom: 4px;
+      font-weight: 500;
+      font-size: 12px;
+      color: #5f6368;
     }
     input[type="text"], input[type="password"], select {
       width: 100%;
-      box-sizing: border-box;
-      padding: 8px 12px;
-      font-size: 0.95rem;
-      border: 1px solid #ced4da;
+      height: 34px;
+      padding: 0 10px;
+      font-size: 13px;
+      border: 1px solid #dadce0;
       border-radius: 4px;
+      color: #202124;
+      background: #ffffff;
+      outline: none;
+      transition: border-color 0.15s;
     }
     input:focus, select:focus {
-      outline: none;
-      border-color: #4dabf7;
-      box-shadow: 0 0 0 2px rgba(77,171,247,0.25);
+      border-color: #1a73e8;
     }
     .help-text {
-      font-size: 0.8rem;
-      color: #6c757d;
+      font-size: 11px;
+      color: #70757a;
       margin-top: 4px;
     }
     .btn {
-      background-color: #228be6;
-      color: #fff;
+      background-color: #1a73e8;
+      color: #ffffff;
       border: none;
-      padding: 10px 18px;
-      font-size: 0.95rem;
-      font-weight: 600;
+      height: 34px;
+      padding: 0 18px;
+      font-size: 13px;
+      font-weight: 500;
       border-radius: 4px;
       cursor: pointer;
+      transition: background-color 0.15s;
+      margin-top: 8px;
     }
     .btn:hover {
-      background-color: #1c7ed6;
+      background-color: #1557b0;
     }
-    .status-box {
+    .status-card {
       margin-top: 20px;
-      padding: 12px;
-      background: #f1f3f5;
-      border-radius: 4px;
-      font-size: 0.85rem;
+      padding: 12px 14px;
+      background: #f8f9fa;
+      border: 1px solid #e8eaed;
+      border-radius: 6px;
+      font-size: 12px;
     }
-    .status-item {
+    .status-row {
+      display: flex;
+      justify-content: space-between;
       margin-bottom: 6px;
     }
-    .status-item:last-child {
+    .status-row:last-child {
       margin-bottom: 0;
     }
-    .badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-weight: bold;
-      font-size: 0.75rem;
+    .status-key {
+      color: #5f6368;
     }
-    .badge-on { background: #d3f9d8; color: #2b8a3e; }
-    .badge-off { background: #ffe3e3; color: #c92a2a; }
+    .status-val {
+      font-weight: 500;
+      color: #202124;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dadce0;
+      display: inline-block;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .dot.connected {
+      background: #1e8e3e;
+    }
+    .dot.disconnected {
+      background: #d93025;
+    }
     .alert {
-      padding: 10px;
+      padding: 8px 12px;
       border-radius: 4px;
       margin-bottom: 16px;
       display: none;
-      font-size: 0.9rem;
+      font-size: 12px;
     }
-    .alert-success { background: #d3f9d8; color: #2b8a3e; }
-    .alert-error { background: #ffe3e3; color: #c92a2a; }
+    .alert-success {
+      background: #e6f4ea;
+      color: #137333;
+    }
+    .alert-error {
+      background: #fce8e6;
+      color: #c5221f;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h2>Cài đặt browseruse bridge</h2>
+    <h2 data-i18n="optionsTitle"></h2>
 
     <div id="alertBox" class="alert"></div>
 
     <form id="optionsForm">
       <div class="form-group">
-        <label for="labelInput">Tên hồ sơ (Profile Label):</label>
-        <input type="text" id="labelInput" placeholder="ví dụ: company_chavis.work hoặc personal" required pattern="^[a-zA-Z0-9_.-]{1,32}$" />
-        <div class="help-text">Chỉ gồm chữ cái, số, dấu chấm (.), gạch dưới (_) và gạch ngang (-). Tối đa 32 ký tự.</div>
+        <label for="labelInput" data-i18n="profileLabel"></label>
+        <input type="text" id="labelInput" required pattern="^[a-zA-Z0-9_.-]{1,32}$" data-i18n-placeholder="profilePlaceholder" spellcheck="false" />
+        <div class="help-text" data-i18n="invalidLabel"></div>
       </div>
 
       <div class="form-group">
-        <label for="tokenInput">Mã xác thực (Daemon Token):</label>
-        <input type="password" id="tokenInput" placeholder="Dán mã 64 ký tự hex từ lệnh `make token`" required minlength="64" maxlength="64" />
-        <div class="help-text">Chạy <code>make token</code> trong thư mục daemon để lấy token.</div>
+        <label for="tokenInput" data-i18n="daemonToken"></label>
+        <input type="password" id="tokenInput" required minlength="64" maxlength="64" spellcheck="false" />
+        <div class="help-text" data-i18n="daemonTokenHelp"></div>
       </div>
 
       <div class="form-group">
-        <label for="daemonUrlInput">Địa chỉ Daemon WebSocket:</label>
-        <input type="text" id="daemonUrlInput" value="ws://127.0.0.1:3025/ext" required />
-        <div class="help-text">Mặc định: <code>ws://127.0.0.1:3025/ext</code></div>
+        <label for="daemonUrlInput" data-i18n="daemonUrl"></label>
+        <input type="text" id="daemonUrlInput" value="ws://127.0.0.1:3025/ext" required spellcheck="false" />
       </div>
 
       <div class="form-group">
-        <label for="windowModeSelect">Chế độ cửa sổ (Window Mode):</label>
+        <label for="windowModeSelect" data-i18n="windowMode"></label>
         <select id="windowModeSelect">
-          <option value="dedicated" selected>Cửa sổ riêng (Dedicated window - Khuyến nghị)</option>
-          <option value="current">Cửa sổ đang dùng (Current window)</option>
+          <option value="dedicated" selected data-i18n="windowModeDedicated"></option>
+          <option value="current" data-i18n="windowModeCurrent"></option>
         </select>
-        <div class="help-text">Cửa sổ riêng giúp tab của Agent không làm phiền cửa sổ làm việc của bạn.</div>
+        <div class="help-text" data-i18n="windowModeHelp"></div>
       </div>
 
-      <button type="submit" class="btn" id="saveBtn">Lưu & Kết nối</button>
+      <button type="submit" class="btn" id="saveBtn" data-i18n="save"></button>
     </form>
 
-    <div class="status-box">
-      <div class="status-item">
-        <strong>Trạng thái kết nối:</strong> <span id="connStatus" class="badge badge-off">Đang kiểm tra...</span>
+    <div class="status-card">
+      <div class="status-row">
+        <span class="status-key" data-i18n="statusConnected"></span>
+        <span class="status-val">
+          <span id="connDot" class="dot"></span>
+          <span id="connStatusText"></span>
+        </span>
       </div>
-      <div class="status-item">
-        <strong>Email Chrome:</strong> <span id="userEmail">-</span>
+      <div class="status-row">
+        <span class="status-key" data-i18n="account"></span>
+        <span id="userEmail" class="status-val">-</span>
       </div>
-      <div class="status-item">
-        <strong>Instance ID:</strong> <span id="instanceId" style="font-family: monospace;">-</span>
+      <div class="status-row">
+        <span class="status-key" data-i18n="instanceId"></span>
+        <span id="instanceId" class="status-val" style="font-family: monospace; font-size: 11px;">-</span>
       </div>
     </div>
   </div>

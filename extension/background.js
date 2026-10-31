@@ -812,6 +812,7 @@ async function connect() {
       profile: config.label,
       instanceId: config.instanceId,
       token: config.token,
+      version: '1.1.0',
       protocol: 1,
     };
     ws.send(JSON.stringify(hello));

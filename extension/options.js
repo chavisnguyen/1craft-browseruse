@@ -1,13 +1,30 @@
+function localizeDOM() {
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const key = el.getAttribute('data-i18n');
+    const msg = chrome.i18n.getMessage(key);
+    if (msg) el.textContent = msg;
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    const msg = chrome.i18n.getMessage(key);
+    if (msg) el.setAttribute('placeholder', msg);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  localizeDOM();
+
   const form = document.getElementById('optionsForm');
   const labelInput = document.getElementById('labelInput');
   const tokenInput = document.getElementById('tokenInput');
   const daemonUrlInput = document.getElementById('daemonUrlInput');
   const windowModeSelect = document.getElementById('windowModeSelect');
-  const connStatus = document.getElementById('connStatus');
+  const connDot = document.getElementById('connDot');
+  const connStatusText = document.getElementById('connStatusText');
   const userEmail = document.getElementById('userEmail');
   const instanceIdSpan = document.getElementById('instanceId');
   const alertBox = document.getElementById('alertBox');
+  const saveBtn = document.getElementById('saveBtn');
 
   function showAlert(msg, isError = false) {
     alertBox.textContent = msg;
@@ -25,6 +42,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'daemonUrl',
     'windowMode',
     'instanceId',
+    'email',
   ]);
 
   if (data.label) labelInput.value = data.label;
@@ -50,38 +68,39 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Retrieve user email via chrome.identity (if signed in)
-  if (chrome.identity && chrome.identity.getProfileUserInfo) {
+  if (data.email) {
+    userEmail.textContent = data.email;
+  } else if (chrome.identity && chrome.identity.getProfileUserInfo) {
     try {
       chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, (info) => {
-        if (chrome.runtime.lastError) {
-          userEmail.textContent = 'Không lấy được (' + chrome.runtime.lastError.message + ')';
-        } else if (info && info.email) {
+        if (info && info.email) {
           userEmail.textContent = info.email;
+          chrome.storage.local.set({ email: info.email });
         } else {
-          userEmail.textContent = 'Chưa đăng nhập Chrome';
+          userEmail.textContent = chrome.i18n.getMessage('localProfile') || 'Local profile';
         }
       });
     } catch (e) {
-      userEmail.textContent = 'Lỗi: ' + e.message;
+      userEmail.textContent = chrome.i18n.getMessage('localProfile') || 'Local profile';
     }
   } else {
-    userEmail.textContent = 'API identity không khả dụng';
+    userEmail.textContent = chrome.i18n.getMessage('localProfile') || 'Local profile';
   }
 
   // Check connection status from background
   function refreshStatus() {
     chrome.runtime.sendMessage({ type: 'getStatus' }, (resp) => {
-      if (chrome.runtime.lastError) {
-        connStatus.textContent = 'Offline';
-        connStatus.className = 'badge badge-off';
+      if (chrome.runtime.lastError || !resp) {
+        connDot.className = 'dot disconnected';
+        connStatusText.textContent = chrome.i18n.getMessage('statusDisconnected') || 'Disconnected';
         return;
       }
-      if (resp && resp.connected) {
-        connStatus.textContent = 'Đã kết nối (Online)';
-        connStatus.className = 'badge badge-on';
+      if (resp.connected) {
+        connDot.className = 'dot connected';
+        connStatusText.textContent = chrome.i18n.getMessage('statusConnected') || 'Connected';
       } else {
-        connStatus.textContent = 'Chưa kết nối (Offline)';
-        connStatus.className = 'badge badge-off';
+        connDot.className = 'dot disconnected';
+        connStatusText.textContent = chrome.i18n.getMessage('statusDisconnected') || 'Disconnected';
       }
     });
   }
@@ -100,14 +119,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const labelRegex = /^[a-zA-Z0-9_.-]{1,32}$/;
     if (!labelRegex.test(label)) {
-      showAlert('Tên hồ sơ không hợp lệ (1-32 ký tự alphanumeric, ., _, -)', true);
+      showAlert(chrome.i18n.getMessage('invalidLabel') || 'Invalid name', true);
       return;
     }
 
     if (token.length !== 64) {
-      showAlert('Mã xác thực token phải có đúng 64 ký tự hex', true);
+      showAlert(chrome.i18n.getMessage('daemonTokenHelp') || 'Token must be 64 hex characters', true);
       return;
     }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = chrome.i18n.getMessage('saving') || 'Saving...';
 
     await chrome.storage.local.set({
       label,
@@ -118,7 +140,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Notify background to reconnect
     chrome.runtime.sendMessage({ type: 'reconnect' }, () => {
-      showAlert('Đã lưu cấu hình và gửi yêu cầu kết nối lại!');
+      saveBtn.disabled = false;
+      saveBtn.textContent = chrome.i18n.getMessage('save') || 'Save';
+      showAlert(chrome.i18n.getMessage('savedSettings') || 'Settings saved');
       setTimeout(refreshStatus, 500);
     });
   });

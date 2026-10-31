@@ -1,0 +1,82 @@
+{
+  "extName": {
+    "message": "browseruse bridge",
+    "description": "Extension name"
+  },
+  "extDesc": {
+    "message": "Chrome extension bridge for browseruse MCP daemon",
+    "description": "Extension description"
+  },
+  "statusConnected": {
+    "message": "Connected"
+  },
+  "statusDisconnected": {
+    "message": "Disconnected"
+  },
+  "profileLabel": {
+    "message": "Profile name"
+  },
+  "profilePlaceholder": {
+    "message": "e.g. company_user or personal"
+  },
+  "save": {
+    "message": "Save"
+  },
+  "saved": {
+    "message": "Saved"
+  },
+  "saving": {
+    "message": "Saving..."
+  },
+  "account": {
+    "message": "Account"
+  },
+  "localProfile": {
+    "message": "Local profile"
+  },
+  "activeTabs": {
+    "message": "Active tabs"
+  },
+  "settings": {
+    "message": "Settings"
+  },
+  "reconnect": {
+    "message": "Reconnect"
+  },
+  "reconnecting": {
+    "message": "Reconnecting..."
+  },
+  "invalidLabel": {
+    "message": "Name must be 1-32 chars (alphanumeric, ., _, -)"
+  },
+  "optionsTitle": {
+    "message": "browseruse bridge settings"
+  },
+  "daemonToken": {
+    "message": "Daemon token"
+  },
+  "daemonTokenHelp": {
+    "message": "64-character hex token from ~/.browseruse/token"
+  },
+  "daemonUrl": {
+    "message": "Daemon address"
+  },
+  "windowMode": {
+    "message": "Window mode"
+  },
+  "windowModeDedicated": {
+    "message": "Dedicated window (recommended)"
+  },
+  "windowModeCurrent": {
+    "message": "Current window"
+  },
+  "windowModeHelp": {
+    "message": "Dedicated window keeps automated tabs isolated from your active workspace."
+  },
+  "instanceId": {
+    "message": "Instance ID"
+  },
+  "savedSettings": {
+    "message": "Settings saved and reconnected."
+  }
+}
