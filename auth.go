@@ -22,7 +22,15 @@ func getTokenFilePath() (string, error) {
 }
 
 // GetOrCreateToken returns the existing auth token from ~/.browseruse/token or generates a new one.
+// If BROWSERUSE_TOKEN environment variable is set, it takes highest precedence.
 func GetOrCreateToken() (string, error) {
+	if envTok := strings.TrimSpace(os.Getenv("BROWSERUSE_TOKEN")); envTok != "" {
+		if len(envTok) == 64 {
+			return envTok, nil
+		}
+		return "", fmt.Errorf("BROWSERUSE_TOKEN must be exactly 64 hex characters (got %d)", len(envTok))
+	}
+
 	tokenPath, err := getTokenFilePath()
 	if err != nil {
 		return "", err

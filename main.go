@@ -248,9 +248,15 @@ func setupMCPServer() *server.MCPServer {
 }
 
 func main() {
+	defaultPort := "3025"
+	if p := os.Getenv("PORT"); p != "" {
+		defaultPort = p
+	}
+	defaultHost := os.Getenv("HOST")
+
 	sseMode := flag.Bool("sse", false, "Run in HTTP/SSE Server daemon mode (default is stdio)")
-	port := flag.String("port", "3025", "Port to bind HTTP/SSE server (e.g. 3025)")
-	host := flag.String("host", "", "Specific host to bind (default empty: binds dual-stack loopback 127.0.0.1 and [::1])")
+	port := flag.String("port", defaultPort, "Port to bind HTTP/SSE server (e.g. 3025)")
+	host := flag.String("host", defaultHost, "Specific host to bind (default empty: binds dual-stack loopback 127.0.0.1 and [::1])")
 	tokenFlag := flag.Bool("token", false, "Print auth token for Chrome extension and exit")
 	flag.Parse()
 
