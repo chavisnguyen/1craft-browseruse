@@ -2,6 +2,8 @@
 
 > **Control your browser with your AI**
 
+[![Latest Release](https://img.shields.io/github/v/release/chavisnguyen/1craft-browseruse?style=flat-square&color=blue)](https://github.com/chavisnguyen/1craft-browseruse/releases)
+[![Homebrew](https://img.shields.io/badge/Homebrew-chavisnguyen%2Fbrowseruse-orange?style=flat-square&logo=homebrew)](https://github.com/chavisnguyen/homebrew-browseruse)
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -18,8 +20,8 @@
 * **No macOS Full Disk Access Needed:** Unlike legacy Chrome CDP setups blocked by macOS TCC permissions when reading `DevToolsActivePort`, the 1craft MV3 Chrome Extension bridge connects over authenticated local WebSockets.
 * **Multi-Profile Isolation (`work`, `personal`...):** Connect multiple Chrome profiles simultaneously. Agents can route tasks to designated profiles (e.g., `browser_new_tab(url, profile="work")`). Profile labels can be customized or auto-derived from your logged-in Google Accounts.
 * **Dedicated Background Window:** Agent tabs run inside an isolated, standardized 1280×900 dedicated window. The AI browses, clicks, and types without interfering with your active personal windows or hijacking your cursor.
+* **Zero-Dependency Installation:** Install in seconds via Homebrew (`brew install browseruse`) or compile from source with `make setup`.
 * **Zero API Key Overhead:** Directly leverages your AI agent's native vision and reasoning capabilities via DOM snapshots and element selector maps.
-* **1-Click Quickstart:** Run `make setup` to compile the binary, generate auth tokens, pre-configure the extension, and register the MCP server with all your local agent clients in seconds.
 
 ---
 
