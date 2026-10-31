@@ -68,15 +68,43 @@ When an agent requests a new tab, the router selects the best available backend 
 
 ---
 
-## 🚀 Quickstart (1-Click Setup)
+## 🚀 Quickstart
 
-### Prerequisites
+### Method 1: Homebrew (Recommended — No Go Runtime Needed)
 
+```bash
+brew tap chavisnguyen/browseruse
+brew install browseruse
+
+# Start the shared background MCP daemon (managed via macOS launchd)
+brew services start browseruse
+```
+
+Get your extension authentication token:
+```bash
+1craft-browseruse -token
+```
+
+Load the extension:
+1. Open Chrome and navigate to `chrome://extensions`.
+2. Turn ON **Developer mode** (top-right switch).
+3. Click **Load unpacked** and select:
+   ```
+   $(brew --prefix)/share/browseruse/extension
+   ```
+4. In extension Options, paste your token and click Save.
+5. Add `http://localhost:3025/mcp` to your MCP client (Claude Code, AGY, Cursor, OpenCode).
+
+---
+
+### Method 2: From Source (Developers)
+
+#### Prerequisites
 * macOS, Linux, or Windows (WSL)
 * [Go 1.22+](https://golang.org) installed
 * Google Chrome (or Chromium-based browser)
 
-### 1. Run 1-Click Setup
+#### 1-Click Setup
 
 Clone the repository and run:
 
@@ -94,13 +122,7 @@ This single command will:
 5. Start the background SSE daemon on port `3025`.
 6. Copy the absolute path of the `extension/` directory straight to your clipboard (macOS).
 
-### 2. Load the Extension in Chrome
-
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Toggle on **Developer mode** in the top-right corner.
-3. Click **Load unpacked**.
-4. Press `Cmd+Shift+G` (macOS), paste from your clipboard (`Cmd+V`), and press `Enter` to select the `extension` folder.
-5. The extension will **connect automatically**—no manual token copy-pasting required!
+Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the `extension` folder (`Cmd+Shift+G` -> `Cmd+V` -> `Enter`).
 
 ---
 

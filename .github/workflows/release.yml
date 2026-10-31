@@ -1,0 +1,182 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name (e.g. v1.2.1)'
+        required: true
+        default: 'v1.2.1'
+
+permissions:
+  contents: write
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard - package versions match release tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "Validating version consistency for $VERSION ($TAG)..."
+          grep -F "Version          = \"${VERSION}\"" main.go
+          grep -F "\"version\": \"${VERSION}\"" extension/manifest.json
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+      - name: Run tests
+        run: go test -v -count=1 ./...
+
+  extension-zip:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package extension zip
+        run: |
+          mkdir -p /tmp/pkg-ext
+          cp -r extension /tmp/pkg-ext/extension
+          rm -f /tmp/pkg-ext/extension/default_config.json
+          (cd /tmp/pkg-ext && zip -r "$GITHUB_WORKSPACE/1craft-browseruse-extension.zip" extension)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: 1craft-browseruse-extension.zip
+
+  binaries:
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            goos: darwin
+            goarch: arm64
+          - target: darwin-amd64
+            goos: darwin
+            goarch: amd64
+          - target: linux-amd64
+            goos: linux
+            goarch: amd64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+      - name: Build binary and package archive
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          
+          mkdir -p /tmp/staging/extension
+          cp -r extension/* /tmp/staging/extension/
+          rm -f /tmp/staging/extension/default_config.json
+          
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -ldflags="-s -w -X main.Version=${VERSION}" -o /tmp/staging/1craft-browseruse .
+            
+          ARCHIVE_NAME="1craft-browseruse-${{ matrix.target }}.tar.gz"
+          tar -czf "$GITHUB_WORKSPACE/$ARCHIVE_NAME" -C /tmp/staging 1craft-browseruse extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: 1craft-browseruse-${{ matrix.target }}.tar.gz
+
+  attach:
+    needs: [extension-zip, binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+      - name: Generate Checksums
+        working-directory: release-assets
+        run: |
+          sha256sum 1craft-browseruse-*.tar.gz 1craft-browseruse-*.zip > checksums.txt
+          cat checksums.txt
+      - name: Attach assets to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release upload "$TAG" release-assets/* --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: release-assets/checksums.txt
+
+  bump-tap:
+    needs: attach
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check TAP_TOKEN secret availability
+        id: check_token
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          if [ -n "$TAP_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+            echo "::warning ::TAP_TOKEN secret is not set. Skipping Homebrew tap bump."
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.check_token.outputs.has_token == 'true'
+        with:
+          name: release-checksums
+          path: .
+      - name: Checkout Homebrew tap
+        if: steps.check_token.outputs.has_token == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: chavisnguyen/homebrew-browseruse
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+      - name: Bump Formula
+        if: steps.check_token.outputs.has_token == 'true'
+        working-directory: tap
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          ARM64_SHA=$(grep "1craft-browseruse-darwin-arm64.tar.gz" ../checksums.txt | awk '{print $1}')
+          AMD64_SHA=$(grep "1craft-browseruse-darwin-amd64.tar.gz" ../checksums.txt | awk '{print $1}')
+          LINUX_SHA=$(grep "1craft-browseruse-linux-amd64.tar.gz" ../checksums.txt | awk '{print $1}')
+          
+          python3 - << PYEOF
+          import re
+
+          p = "Formula/browseruse.rb"
+          s = open(p).read()
+          tag = "$TAG"
+          arm = "$ARM64_SHA"
+          intel = "$AMD64_SHA"
+          linux = "$LINUX_SHA"
+
+          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-darwin-arm64\.tar\.gz",
+                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-darwin-arm64.tar.gz", s)
+          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-darwin-amd64\.tar\.gz",
+                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-darwin-amd64.tar.gz", s)
+          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-linux-amd64\.tar\.gz",
+                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-linux-amd64.tar.gz", s)
+
+          s = re.sub(r'(1craft-browseruse-darwin-arm64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{arm}", s)
+          s = re.sub(r'(1craft-browseruse-darwin-amd64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{intel}", s)
+          s = re.sub(r'(1craft-browseruse-linux-amd64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{linux}", s)
+
+          open(p, "w").write(s)
+          PYEOF
+          
+          git diff --stat
+          git add Formula/browseruse.rb
+          git -c "user.name=browseruse-bot" -c "user.email=browseruse-bot@users.noreply.github.com" \
+            commit -m "browseruse ${TAG}" && git push || echo "nothing to bump"

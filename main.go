@@ -20,13 +20,14 @@ import (
 )
 
 var (
+	Version          = "1.2.1"
 	defaultRodDriver = NewRodDriver()
 	defaultExtHub    = NewExtHub(30 * time.Second)
 	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)
 )
 
 func setupMCPServer() *server.MCPServer {
-	s := server.NewMCPServer("1craft-browseruse", "1.2.0")
+	s := server.NewMCPServer("1craft-browseruse", Version)
 
 	// 0. list_profiles
 	listProfilesTool := mcp.NewTool("list_profiles",
@@ -258,7 +259,14 @@ func main() {
 	port := flag.String("port", defaultPort, "Port to bind HTTP/SSE server (e.g. 3025)")
 	host := flag.String("host", defaultHost, "Specific host to bind (default empty: binds dual-stack loopback 127.0.0.1 and [::1])")
 	tokenFlag := flag.Bool("token", false, "Print auth token for Chrome extension and exit")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
+	vFlag := flag.Bool("v", false, "Print version and exit")
 	flag.Parse()
+
+	if *versionFlag || *vFlag || (len(os.Args) > 1 && os.Args[1] == "version") {
+		fmt.Printf("1craft-browseruse v%s\n", Version)
+		return
+	}
 
 	if *tokenFlag {
 		tok, err := GetOrCreateToken()
