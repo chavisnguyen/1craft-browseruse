@@ -81,7 +81,7 @@ When an agent requests a new tab, the router selects the best available backend 
 Clone the repository and run:
 
 ```bash
-git clone git@github.com:chavisnguyen/1craft-browseruse.git
+git clone https://github.com/chavisnguyen/1craft-browseruse.git
 cd 1craft-browseruse
 make setup
 ```
