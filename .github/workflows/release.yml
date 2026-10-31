@@ -110,6 +110,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          gh release view "$TAG" || gh release create "$TAG" --title "1craft BrowserUse $TAG" --notes "Release $TAG"
           gh release upload "$TAG" release-assets/* --clobber
       - uses: actions/upload-artifact@v4
         with:
