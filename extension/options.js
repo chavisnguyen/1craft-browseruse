@@ -33,6 +33,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (data.windowMode) windowModeSelect.value = data.windowMode;
   if (data.instanceId) instanceIdSpan.textContent = data.instanceId;
 
+  // If no saved token, attempt prefill from default_config.json
+  if (!data.token) {
+    try {
+      const resp = await fetch(chrome.runtime.getURL('default_config.json'));
+      if (resp.ok) {
+        const def = await resp.json();
+        if (def.label && !labelInput.value) labelInput.value = def.label;
+        if (def.token && !tokenInput.value) tokenInput.value = def.token;
+        if (def.daemonUrl && !daemonUrlInput.value) daemonUrlInput.value = def.daemonUrl;
+        if (def.windowMode && !windowModeSelect.value) windowModeSelect.value = def.windowMode;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   // Retrieve user email via chrome.identity (if signed in)
   if (chrome.identity && chrome.identity.getProfileUserInfo) {
     try {

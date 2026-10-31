@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+extension/default_config.json
 bin/
 daemon.pid
 daemon.log

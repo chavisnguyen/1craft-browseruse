@@ -40,16 +40,41 @@ async function getConfig() {
     'windowMode',
     'instanceId',
   ]);
+
+  let label = (data.label || '').trim();
+  let token = (data.token || '').trim();
+  let daemonUrl = (data.daemonUrl || 'ws://127.0.0.1:3025/ext').trim();
+  let windowMode = data.windowMode || 'dedicated';
+
+  // Fallback to pre-generated default_config.json if token is missing
+  if (!token) {
+    try {
+      const resp = await fetch(chrome.runtime.getURL('default_config.json'));
+      if (resp.ok) {
+        const def = await resp.json();
+        if (def.token) {
+          token = (def.token || '').trim();
+          label = label || (def.label || 'default').trim();
+          daemonUrl = (def.daemonUrl || daemonUrl).trim();
+          windowMode = def.windowMode || windowMode;
+          await chrome.storage.local.set({ label, token, daemonUrl, windowMode });
+        }
+      }
+    } catch {
+      // ignore if default_config.json doesn't exist
+    }
+  }
+
   let instanceId = data.instanceId;
   if (!instanceId) {
     instanceId = generateUUID();
     await chrome.storage.local.set({ instanceId });
   }
   return {
-    label: (data.label || '').trim(),
-    token: (data.token || '').trim(),
-    daemonUrl: (data.daemonUrl || 'ws://127.0.0.1:3025/ext').trim(),
-    windowMode: data.windowMode || 'dedicated',
+    label,
+    token,
+    daemonUrl,
+    windowMode,
     instanceId,
   };
 }

@@ -9,9 +9,34 @@ PID_FILE := daemon.pid
 LOG_FILE := daemon.log
 PORT ?= 3025
 
-.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help
+.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help setup quickstart
 
 all: build
+
+## setup: Tự động hoá 1-click toàn bộ cấu hình, token và chạy daemon
+setup: build
+	@TOKEN=$$($(BIN_PATH) -token); \
+	printf '{\n  "label": "default",\n  "token": "'$$TOKEN'",\n  "daemonUrl": "ws://127.0.0.1:$(PORT)/ext",\n  "windowMode": "dedicated"\n}\n' > extension/default_config.json
+	@chmod 600 extension/default_config.json
+	@echo "🔑 Đã tự động nhúng token vào extension/default_config.json"
+	@./install.sh
+	@$(MAKE) restart
+	@EXT_PATH="$$(pwd)/extension"; \
+	if command -v pbcopy >/dev/null 2>&1; then \
+		printf "$$EXT_PATH" | pbcopy; \
+		echo "📋 Đã copy đường dẫn extension vào clipboard: $$EXT_PATH"; \
+	fi
+	@echo ""
+	@echo "========================================================"
+	@echo "🎉 SETUP HOÀN TẤT TRONG 1 CLICK!"
+	@echo "========================================================"
+	@echo "1. Mở Chrome gõ: chrome://extensions"
+	@echo "2. Bật 'Developer mode' (góc phải trên)"
+	@echo "3. Bấm 'Load unpacked' -> Nhấn Cmd+Shift+G rồi Cmd+V (Enter) để chọn thư mục extension"
+	@echo "👉 Extension sẽ TỰ ĐỘNG KẾT NỐI NGAY LẬP TỨC (không cần dán token hay chỉnh Options)!"
+	@echo "========================================================"
+
+quickstart: setup
 
 ## build: Biên dịch file thực thi Golang nhị phân
 build:
