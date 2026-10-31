@@ -139,11 +139,12 @@ func (d *RodDriver) ensureBrowser() error {
 	headless := os.Getenv("BROWSER_HEADLESS") != "false"
 	l := launcher.New().
 		Bin("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome").
-		Headless(headless)
+		Headless(headless).
+		NoSandbox(true)
 
 	controlURL, err := l.Launch()
 	if err != nil {
-		l = launcher.New().Headless(headless)
+		l = launcher.New().Headless(headless).NoSandbox(true)
 		controlURL, err = l.Launch()
 		if err != nil {
 			return fmt.Errorf("failed to launch browser: %w", err)
