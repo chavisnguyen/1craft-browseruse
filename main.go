@@ -82,7 +82,11 @@ func setupMCPServer() *server.MCPServer {
 			if t.ID == activeTab {
 				marker = "⭐ (active)"
 			}
-			lines = append(lines, fmt.Sprintf("- **`%s`** %s: %s — `%s`", t.ID, marker, t.Title, t.URL))
+			profileTag := ""
+			if t.Profile != "" {
+				profileTag = fmt.Sprintf(" [%s]", t.Profile)
+			}
+			lines = append(lines, fmt.Sprintf("- **`%s`**%s %s: %s — `%s`", t.ID, profileTag, marker, t.Title, t.URL))
 		}
 		return mcp.NewToolResultText(strings.Join(lines, "\n")), nil
 	})

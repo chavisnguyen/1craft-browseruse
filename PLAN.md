@@ -307,9 +307,9 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - [x] **Nghiệm thu thực nghiệm:** click link, gõ input ghi đè + Enter, chụp ảnh và kiểm tra file PNG hợp lệ (51.5 KB), `evaluate("document.title")` và dạng function `() => ...`, điều hướng trang ngoài `https://example.com` và click nút.
 
 ### Phase 5: Nhiều profile song song
-- [ ] Cài extension vào profile thứ hai với nhãn khác.
-- [ ] Kiểm thử tab song song, tab không lẫn, `browser_close` chỉ đóng tab của daemon.
-- **Nghiệm thu thủ công**: `list_profiles` thấy 2 profile; `new_tab` không `profile` -> lỗi liệt kê; `new_tab profile=work` và `profile=personal` mở đúng cửa sổ profile tương ứng; điều khiển xen kẽ hai tab; tắt cửa sổ một profile -> tab của profile đó báo lỗi rõ, profile kia vẫn chạy; bật lại thì tự kết nối lại.
+- [x] Cài extension vào profile thứ hai với nhãn khác (`work` và `personal`).
+- [x] Kiểm thử tab song song, tab không lẫn, `browser_close` chỉ đóng tab của daemon.
+- [x] **Nghiệm thu thực nghiệm tự động**: `list_profiles` thấy 2 profile; `new_tab` không `profile` -> báo lỗi danh sách online; `new_tab profile=work` và `profile=personal` mở đúng profile tương ứng; điều khiển xen kẽ độc lập, không crosstalk; ngắt một profile -> tab profile đó báo lỗi, profile còn lại chạy bình thường; khởi động lại -> tự động kết nối lại.
 
 ### Phase 6: Tài liệu và dọn dẹp
 - [ ] README: mục "Cài extension" (Developer mode -> Load unpacked -> chọn `extension/`, đặt nhãn, dán token từ `make token`), mục chọn profile, bảng so sánh backend, cập nhật phần xử lý sự cố. Bỏ yêu cầu Full Disk Access khỏi **đường khuyên dùng** nhưng giữ ghi chú cho đường CDP.
@@ -459,3 +459,19 @@ Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (d
   12. Điều hướng trang ngoài `https://example.com` và click link `Learn more`.
   13. `browser_close_tab`: dọn dẹp đóng tab thành công.
 - Toàn bộ 13 test chạy xanh 100%, `go test -count=1 ./...` và `go vet ./...` đạt 100% OK.
+
+### Phase 5: Nhiều profile song song & Cô lập hoàn toàn
+- **Các file thay đổi**:
+  - `main.go`: cập nhật `browser_list_tabs` hiển thị nhãn profile `[<profile>]` cạnh ID tab nếu tab thuộc về một extension profile (ví dụ `- **tab-1** [work] : ...`), bảo đảm tuân thủ đúng yêu cầu mục 6.4.
+- **Kết quả nghiệm thu E2E tự động đa profile (10 kịch bản qua MCP)**:
+  1. `list_profiles`: hiển thị đồng thời cả 2 profile `work` và `personal` online.
+  2. `browser_new_tab` không truyền `profile`: trả về đúng lỗi liệt kê danh sách profile đang online theo quy tắc 2.4 (`multiple extension profiles online (personal, work). Please specify 'profile' in 'browser_new_tab'`).
+  3. `browser_new_tab(profile='work')`: mở đúng trang làm việc trên instance `work` (`tab-1`).
+  4. `browser_new_tab(profile='personal')`: mở đúng trang cá nhân trên instance `personal` (`tab-2`).
+  5. `browser_list_tabs`: hiển thị rõ nhãn profile cho từng tab (`tab-1 [work]`, `tab-2 [personal]`).
+  6. **Kiểm tra cô lập dữ liệu (không lẫn lộn / zero crosstalk)**: gõ giá trị bí mật vào ô input trên `tab-1` và giá trị cá nhân vào `tab-2`; evaluate xác nhận từng tab nhận đúng giá trị của mình, không bị đè hay lẫn nhau.
+  7. **Tương tác click độc lập**: kích hoạt click trên `tab-1` và `tab-2`, cả 2 giao diện cập nhật trạng thái độc lập.
+  8. **Xử lý ngắt kết nối an toàn**: ngắt tiến trình `work`, kiểm tra `list_profiles` lập tức chỉ còn `personal`; thao tác trên `tab-2` (`personal`) vẫn hoạt động hoàn hảo và không bị gián đoạn.
+  9. **Tự động phục hồi kết nối**: khởi động lại tiến trình `work`, extension tự động kết nối lại vào Hub mà không cần can thiệp; `list_profiles` khôi phục đầy đủ cả 2 profile.
+  10. `browser_close`: dọn dẹp và đóng sạch toàn bộ các tab do daemon quản lý; `browser_list_tabs` trở về trạng thái trống.
+- `go test -count=1 ./...` và `go vet ./...` đạt 100% OK.
