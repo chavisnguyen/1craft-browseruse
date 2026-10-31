@@ -312,9 +312,9 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - [x] **Nghiệm thu thực nghiệm tự động**: `list_profiles` thấy 2 profile; `new_tab` không `profile` -> báo lỗi danh sách online; `new_tab profile=work` và `profile=personal` mở đúng profile tương ứng; điều khiển xen kẽ độc lập, không crosstalk; ngắt một profile -> tab profile đó báo lỗi, profile còn lại chạy bình thường; khởi động lại -> tự động kết nối lại.
 
 ### Phase 6: Tài liệu và dọn dẹp
-- [ ] README: mục "Cài extension" (Developer mode -> Load unpacked -> chọn `extension/`, đặt nhãn, dán token từ `make token`), mục chọn profile, bảng so sánh backend, cập nhật phần xử lý sự cố. Bỏ yêu cầu Full Disk Access khỏi **đường khuyên dùng** nhưng giữ ghi chú cho đường CDP.
-- [ ] Cập nhật mục "Server lấy Chrome từ đâu" trong README (thêm backend extension ở ưu tiên 1).
-- [ ] Cập nhật `PLAN.md`: đánh dấu hoàn thành, ghi lại các điều học được.
+- [x] README: mục "Cài extension" (Developer mode -> Load unpacked -> chọn `extension/`, đặt nhãn, dán token từ `make token`), mục chọn profile, bảng so sánh backend, cập nhật phần xử lý sự cố. Bỏ yêu cầu Full Disk Access khỏi **đường khuyên dùng** nhưng giữ ghi chú cho đường CDP.
+- [x] Cập nhật mục "Server lấy Chrome từ đâu" trong README (thêm backend extension ở ưu tiên 1).
+- [x] Cập nhật `PLAN.md`: đánh dấu hoàn thành, ghi lại các điều học được.
 
 ---
 
@@ -475,3 +475,30 @@ Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (d
   9. **Tự động phục hồi kết nối**: khởi động lại tiến trình `work`, extension tự động kết nối lại vào Hub mà không cần can thiệp; `list_profiles` khôi phục đầy đủ cả 2 profile.
   10. `browser_close`: dọn dẹp và đóng sạch toàn bộ các tab do daemon quản lý; `browser_list_tabs` trở về trạng thái trống.
 - `go test -count=1 ./...` và `go vet ./...` đạt 100% OK.
+
+### Phase 6: Hoàn thiện Tài liệu, Hướng dẫn & Dọn dẹp
+- **Các file thay đổi**:
+  - `README.md`:
+    - Cập nhật mục "Server lấy Chrome từ đâu" đưa Chrome Extension Bridge lên ưu tiên 1 (khuyên dùng).
+    - Thêm mục hướng dẫn "Cài đặt Chrome Extension (Khuyên dùng)" chi tiết từng bước: bật Developer mode, tải tiện ích unpacked từ `extension/`, đặt nhãn và dán token từ `make token`.
+    - Thêm mục "Chọn Profile Extension khi làm việc" hướng dẫn cách điều khiển 1 profile tự động hoặc nhiều profile song song qua tham số `profile`.
+    - Thêm "Bảng so sánh các Backend" làm rõ ưu nhược điểm giữa Extension Bridge, CDP Port 9222 và Standalone Chrome.
+    - Cập nhật bảng "Xử lý sự cố" bổ sung các lỗi thường gặp của extension (badge đỏ, cảnh báo debugging, `multiple extension profiles online`, `label_in_use`).
+    - Bổ sung tool `list_profiles` và tham số `profile` trong danh sách tool.
+    - Giữ nguyên tài liệu hướng dẫn và lưu ý cho đường CDP cũ cho người dùng muốn dùng tiếp.
+  - `PLAN.md`: cập nhật trạng thái toàn bộ các phase từ 0 đến 6 thành công [x], tổng kết các bài học kinh nghiệm.
+
+---
+
+## 14. Tổng kết các bài học kỹ thuật cốt lõi (Key Learnings)
+
+1. **Manifest V3 Service Worker Lifecycle**:
+   - MV3 Service Worker bị Chrome tự động suspend sau ~30 giây không hoạt động. Giải pháp kết hợp Ping WebSocket 20 giây từ daemon và Chrome Alarms 30 giây trong extension giữ kết nối sống vĩnh viễn và phản hồi ngay lập tức.
+2. **Tránh xung đột giao thức DevTools trên macOS**:
+   - Chrome phiên bản mới (v136+) đóng cổng `/json/version` và macOS chặn đọc `DevToolsActivePort` nếu không có Full Disk Access. Việc chuyển sang kiến trúc Extension Bridge loại bỏ hoàn toàn yêu cầu quyền Full Disk Access và mang lại tính ổn định tuyệt đối giữa các bản cập nhật Chrome.
+3. **Cửa sổ riêng (Dedicated Window Mode)**:
+   - Chạy các tab tự động hoá trong một cửa sổ riêng (`width: 1280, height: 900`, `focused: false`) giúp Agent chụp ảnh toàn trang và tương tác chuột/bàn phím chính xác mà không chiếm quyền điều khiển chuột hay làm gián đoạn cửa sổ duyệt web hàng ngày của người dùng.
+4. **RPC Multiplexing & Dual Loopback**:
+   - Sử dụng định danh request `id` trên một kết nối WebSocket duy nhất cho phép xử lý song song các tác vụ mà không bị nghẽn (head-of-line blocking). Đồng thời bind cả IPv4 (`127.0.0.1`) và IPv6 (`[::1]`) cùng cơ chế kiểm tra token và Origin header bảo vệ an toàn toàn diện chống tấn công từ web độc hại (DNS rebinding / CSRF).
+5. **Đa profile phân tách hoàn toàn (Zero Crosstalk)**:
+   - Router quản lý theo bảng tham chiếu nội bộ (`tabRef`) ánh xạ ID logic (`tab-1`, `tab-2`...) tới driver và profile tương ứng. Việc phân tách này đảm bảo cookie, session và DOM của các profile công việc và cá nhân không bao giờ bị lẫn lộn, đồng thời cô lập lỗi khi một profile đóng hoặc rớt mạng.

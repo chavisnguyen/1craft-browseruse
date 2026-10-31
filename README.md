@@ -35,8 +35,9 @@ MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ c
 
 ## 🌐 Các Tool cung cấp cho Agent
 
-* `browser_new_tab(url)`: Mở một Tab mới độc lập (trả về `tab_id`, ví dụ `tab-1`).
-* `browser_list_tabs()`: Liệt kê tất cả các tab đang mở, tab nào đang active.
+* `list_profiles()`: Liệt kê các profile Chrome Extension đang online (nhãn, email nếu có, số tab quản lý).
+* `browser_new_tab(url, profile)`: Mở một Tab mới độc lập (trả về `tab_id`, ví dụ `tab-1`). Hỗ trợ chọn profile extension (ví dụ `work`, `personal`).
+* `browser_list_tabs()`: Liệt kê tất cả các tab đang mở, nhãn profile của từng tab, và tab nào đang active.
 * `browser_close_tab(tab_id)`: Đóng tab cụ thể khi làm xong.
 * `browser_navigate(url, tab_id)`: Mở link trên tab chỉ định (hoặc tab active).
 * `browser_snapshot(tab_id)`: Đọc cấu trúc UI, các nút bấm, ô input của tab.
@@ -45,8 +46,8 @@ MCP Server điều khiển trình duyệt viết bằng **Golang**, hỗ trợ c
 * `browser_press_key(key, tab_id)`: Bấm phím bàn phím trên tab.
 * `browser_screenshot(filename, tab_id)`: Chụp ảnh màn hình của tab lưu file PNG.
 * `browser_evaluate(script, tab_id)`: Thực thi code JavaScript trên tab.
-* `get_browser_status()`: Xem trạng thái hệ thống và danh sách tab.
-* `browser_close()`: Đóng toàn bộ các tab và tài nguyên.
+* `get_browser_status()`: Xem trạng thái hệ thống, danh sách profile extension và các tab đang mở.
+* `browser_close()`: Đóng toàn bộ các tab và tài nguyên do daemon quản lý.
 
 ---
 
@@ -62,17 +63,65 @@ Sau đó mở đồng thời **Claude Code**, **AGY**, hay **Cursor** và ra l�
 
 ## 🔌 Server lấy Chrome từ đâu?
 
-Mỗi lần có Agent gọi tool, server tìm trình duyệt theo thứ tự:
+Mỗi lần có Agent gọi tool mở tab, server tìm backend trình duyệt theo thứ tự ưu tiên:
 
-| Thứ tự | Cách | Khi nào | Có login của bạn? | Icon Dock? |
-| :--- | :--- | :--- | :--- | :--- |
-| 1 | **Chrome hằng ngày** (qua `chrome://inspect`) | Đã bật công tắc, xem mục "Cài đặt lần đầu" | ✅ | Không thêm |
-| 2 | **Chrome có cổng HTTP** `http://127.0.0.1:9222` | Chạy `make chrome` hoặc `./start-chrome.sh isolated` | ✅ (main) / ❌ (isolated) | Không thêm / thêm 1 |
-| 3 | **Chrome headless dự phòng** | Hai cách trên đều không có | ❌ profile trống | Không có |
+| Thứ tự | Backend | Khi nào kích hoạt | Quyền macOS | Profile & Cookie | Cửa sổ thao tác |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1 (Khuyên dùng)** | **Chrome Extension Bridge** | Có profile extension online | 🟢 **Không cần Full Disk Access** | ✅ Đa profile đồng thời (`work`, `personal`...), cookie thật | Cửa sổ riêng (Dedicated), không chiếm chuột/focus |
+| 2 | **Chrome hằng ngày (CDP)** | Bật `chrome://inspect`, không có extension | 🟡 Cần **Full Disk Access** cho terminal | ✅ Profile chính | Cửa sổ Chrome đang dùng |
+| 3 | **Chrome cổng HTTP 9222** | Chạy `make chrome` hoặc `./start-chrome.sh` | 🟢 Không cần | ✅ (main) / ❌ (isolated) | Cửa sổ riêng |
+| 4 | **Chrome Standalone dự phòng** | Không có 3 cách trên | 🟢 Không cần | ❌ Profile tạm (mất cookie khi tắt) | Headless ngầm |
 
-Chrome tự launch (cách 3) sẽ tự tắt khi đóng tab cuối, và tự launch lại nếu bị tắt giữa chừng. Chrome ở cách 1 và 2 thì server **không bao giờ tắt** giúp bạn.
+---
 
-### Cài đặt lần đầu (dùng Chrome hằng ngày)
+## 🧩 Cài đặt Chrome Extension (Khuyên dùng)
+
+Cài extension giúp Agent điều khiển Chrome ổn định, **không cần cấp quyền Full Disk Access** và **hỗ trợ nhiều profile cùng lúc**:
+
+1. Lấy mã token xác thực:
+   ```bash
+   make token
+   ```
+2. Mở trình duyệt Chrome trên profile bạn muốn dùng (ví dụ profile cá nhân hoặc profile công việc):
+   * Truy cập `chrome://extensions`.
+   * Bật công tắc **Developer mode** ở góc phải trên.
+   * Bấm **Load unpacked** (Tải tiện ích đã giải nén) và chọn thư mục `extension/` trong repo `browseruse`.
+3. Cấu hình Extension:
+   * Bấm vào biểu tượng extension hoặc chuột phải vào icon tiện ích → **Options** (Tuỳ chọn).
+   * **Profile Label**: Đặt tên nhãn phân biệt (ví dụ: `work`, `personal`, `default`).
+   * **Auth Token**: Dán mã token lấy được từ lệnh `make token` ở Bước 1.
+   * **Chế độ cửa sổ**: Mặc định là `Cửa sổ riêng (Dedicated Window)` giúp Agent chạy tab riêng mà không làm phiền cửa sổ bạn đang lướt web.
+   * Bấm **Lưu & Kết nối**. Trạng thái sẽ chuyển sang 🟢 **Đã kết nối (Online)**.
+4. *(Tuỳ chọn)* Lặp lại các bước trên trên các profile Chrome khác với nhãn khác (`personal`, `client_a`...) nếu muốn Agent làm việc đa profile song song.
+
+---
+
+## 👥 Chọn Profile Extension khi làm việc
+
+* **Chỉ có 1 profile online**: Agent gọi `browser_new_tab(url)` sẽ tự động chọn profile đó mà không cần chỉ định.
+* **Có từ 2 profile online trở lên**:
+  * Agent hoặc bạn chỉ định rõ profile khi mở tab:
+    ```
+    browser_new_tab(url="https://mail.google.com", profile="work")
+    ```
+  * Nếu không chỉ định `profile`, tool sẽ báo lỗi thân thiện liệt kê tất cả các profile đang online để Agent chọn lại.
+* **Xem danh sách profile online**: Gọi tool `list_profiles()` hoặc `get_browser_status()`.
+
+---
+
+## ⚖️ Bảng so sánh các Backend
+
+| Tiêu chí | Chrome Extension Bridge | Chrome hằng ngày (CDP 9222) | Standalone Chrome |
+| :--- | :--- | :--- | :--- |
+| **Quyền macOS** | 🟢 Không cần Full Disk Access | 🔴 Bắt buộc Full Disk Access | 🟢 Không cần |
+| **Đa profile đồng thời** | 🟢 Hỗ trợ song song nhiều profile (`work`, `personal`...) | 🔴 Chỉ 1 profile | 🔴 Không hỗ trợ |
+| **Đăng nhập & Cookie** | 🟢 Đầy đủ tài khoản, cookie của từng profile | 🟢 Đầy đủ tài khoản của profile chính | 🔴 Profile rỗng, mất khi tắt |
+| **Trải nghiệm dùng** | 🟢 Mở cửa sổ riêng kích thước chuẩn 1280x900, không cướp focus chuột | 🟡 Mở tab trực tiếp trong cửa sổ Chrome bạn đang lướt | ⚪ Chạy ngầm headless |
+| **Tính ổn định** | 🟢 Không phụ thuộc format file `DevToolsActivePort` | 🟡 Dễ lệch port khi Chrome tự cập nhật | 🟢 Ổn định nhưng không có cookie |
+
+---
+
+### Cài đặt dự phòng qua CDP (Nếu không dùng Extension)
 
 Chrome hiện tại (136+) chỉ cho Agent nối vào profile hằng ngày qua cơ chế remote debugging riêng, không còn endpoint HTTP `/json/version` (trả `404`).
 
@@ -99,13 +148,17 @@ Server tự đọc lại `DevToolsActivePort` ở mỗi lần dùng, nên Chrome
 
 | Triệu chứng | Nguyên nhân / Cách sửa |
 | :--- | :--- |
-| `get_browser_status` báo 🔴 "Standalone Chrome" | Server không nối được Chrome hằng ngày. Kiểm tra: công tắc `chrome://inspect/#remote-debugging` còn bật; terminal có Full Disk Access; `make status` xanh. Log: `daemon.log` (dòng `resolveCDP: cannot read DevToolsActivePort`) |
-| `operation not permitted` khi đọc `DevToolsActivePort` | macOS chặn. Làm lại bước 2 ở "Cài đặt lần đầu", nhớ Cmd+Q terminal. Lưu ý: tiến trình chạy trong sandbox của Claude Code cũng bị chặn, hãy chạy `make restart` từ terminal của bạn, không từ Agent |
+| Extension Options báo "Chưa kết nối" / Badge `!` đỏ | Daemon chưa chạy hoặc token không đúng. Chạy `make daemon`, sau đó chạy `make token` và dán lại token chính xác vào Options của extension rồi bấm Lưu. |
+| Thanh vàng *"browseruse started debugging this browser"* | Cảnh báo tiêu chuẩn của Chrome khi extension kết nối điều khiển tab qua `chrome.debugger`. Hoàn toàn bình thường và an toàn. |
+| Báo lỗi *"multiple extension profiles online"* | Đang có từ 2 profile extension online cùng lúc. Cần truyền thêm tham số `profile` trong `browser_new_tab(url="...", profile="work")`. |
+| Báo lỗi *"label_in_use"* | Hai instance extension cấu hình cùng một nhãn profile. Hãy mở Options và đổi tên nhãn phân biệt (ví dụ `work`, `personal`). |
+| `get_browser_status` báo 🔴 "Standalone Chrome" | Không có extension online và server không nối được Chrome hằng ngày qua CDP. Kiểm tra: extension đã nạp và online chưa, hoặc công tắc `chrome://inspect/#remote-debugging` còn bật không và terminal có Full Disk Access chưa. Log: `daemon.log`. |
+| `operation not permitted` khi đọc `DevToolsActivePort` | macOS chặn đọc profile Chrome khi dùng backend CDP cũ. Cách tốt nhất: dùng Chrome Extension để không cần Full Disk Access. Nếu vẫn muốn dùng CDP, cấp Full Disk Access cho terminal rồi Cmd+Q mở lại. |
 | Hai icon Chrome trong Dock | Từng xảy ra khi server tự launch Chrome không headless. Bản hiện tại mặc định headless; nếu còn sót thì `pkill -f "rod/user-data"` hoặc `make restart` |
 | `curl http://127.0.0.1:9222/json/version` trả `404` | Bình thường với Chrome hằng ngày bật qua `chrome://inspect`; server không dùng endpoint này |
-| MCP báo `ECONNREFUSED` trong Claude Code | Daemon đã tắt (thoát terminal, tắt máy...). `make daemon` rồi `/mcp` Reconnect |
+| MCP báo `ECONNREFUSED` trong Claude Code / AGY | Daemon đã tắt (thoát terminal, tắt máy...). Chạy `make daemon` rồi Reconnect MCP |
 | Lỗi biên dịch khi phát triển | Chạy `go build .` hoặc `make build` để biên dịch toàn bộ package main (gồm nhiều file Go). |
-| Đăng nhập mất khi Chrome bị tắt | Server rơi về Chrome headless dự phòng (profile trống). Mở lại Chrome hằng ngày, các lần gọi sau tự nối lại |
+| Đăng nhập mất khi Chrome bị tắt | Server rơi về Chrome headless dự phòng (profile trống). Khởi động lại Chrome/Extension, các lần gọi sau tự nối lại |
 
 ---
 
