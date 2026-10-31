@@ -421,7 +421,7 @@ func findElement(page *rod.Page, target string) (*rod.Element, error) {
 	}
 
 	// 2. Button, Link with matching text
-	el, err = page.Timeout(2 * time.Second).ElementR("button, a, [role='button'], [role='link']", clean)
+	el, err = page.Timeout(2*time.Second).ElementR("button, a, [role='button'], [role='link']", clean)
 	if err == nil && el != nil {
 		return el, nil
 	}
@@ -434,7 +434,7 @@ func findElement(page *rod.Page, target string) (*rod.Element, error) {
 	}
 
 	// 4. Any element with text
-	el, err = page.Timeout(2 * time.Second).ElementR("*", clean)
+	el, err = page.Timeout(2*time.Second).ElementR("*", clean)
 	if err == nil && el != nil {
 		return el, nil
 	}
