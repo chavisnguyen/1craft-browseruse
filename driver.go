@@ -24,6 +24,7 @@ type TabInfo struct {
 // Driver defines the primitives supported by a browser backend (rod or extension).
 type Driver interface {
 	Name() string
+	Mode() string
 	CheckAlive(ctx context.Context, handle string) bool
 	NewTab(ctx context.Context, url string) (handle string, err error)
 	ListTabs(ctx context.Context, handles []string) ([]TabInfo, error)

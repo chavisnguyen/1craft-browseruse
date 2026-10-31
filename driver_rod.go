@@ -37,6 +37,15 @@ func (d *RodDriver) Name() string {
 	return "rod"
 }
 
+func (d *RodDriver) Mode() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.isCDP {
+		return "Google Chrome (CDP Port 9222)"
+	}
+	return "Standalone Chrome"
+}
+
 func (d *RodDriver) CheckAlive(ctx context.Context, handle string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()

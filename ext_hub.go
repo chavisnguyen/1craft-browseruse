@@ -229,13 +229,18 @@ func (h *ExtHub) OnlineProfiles() []string {
 
 func (h *ExtHub) ListProfiles() []ProfileInfo {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
+	sessions := make([]*ExtensionSession, 0, len(h.sessions))
+	for _, s := range h.sessions {
+		sessions = append(sessions, s)
+	}
+	router := h.router
+	h.mu.RUnlock()
 
 	var result []ProfileInfo
-	for _, s := range h.sessions {
+	for _, s := range sessions {
 		openTabs := 0
-		if h.router != nil {
-			openTabs = h.router.countTabsForProfile(s.profile)
+		if router != nil {
+			openTabs = router.countTabsForProfile(s.profile)
 		}
 		result = append(result, ProfileInfo{
 			Profile:     s.profile,

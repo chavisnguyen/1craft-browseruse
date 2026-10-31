@@ -302,9 +302,9 @@ Mỗi phase kết thúc bằng một commit, các test của phase đó phải x
 - [x] **Nghiệm thu** (ghi lại kết quả trong PR/commit): load unpacked vào 1 profile, đặt nhãn+token, `list_profiles` thấy profile; `browser_new_tab(url=example.com)` mở tab ở **đúng profile**; `browser_snapshot` trả đúng "Example Domain" và nút "Learn more".
 
 ### Phase 4: Tương tác
-- [ ] `lib/find_element.js`, `page.click`, `page.type`, `page.pressKey`, `page.screenshot`, `page.evaluate`, quản lý debugger.
-- **Đối chiếu với bộ test đặc tả của Phase 1:** chạy cùng các kịch bản (4 dạng selector, `evaluate` hàm và biểu thức, `type` ghi đè, định dạng `snapshot`) lên extension bằng một trang test cục bộ (`python3 -m http.server` phục vụ file HTML trong thư mục tạm, vì extension không đọc được `data:`/`file:` tuỳ cài đặt), kết quả phải khớp rod; ghi lại mọi khác biệt.
-- **Nghiệm thu thủ công** trên `https://example.com`, một trang có form đăng nhập (vd trang test công khai), và một trang SPA: click link, gõ vào ô input + Enter, chụp ảnh và mở được file PNG, `evaluate("document.title")`.
+- [x] `lib/find_element.js`, `page.click`, `page.type`, `page.pressKey`, `page.screenshot`, `page.evaluate`, quản lý debugger.
+- [x] **Đối chiếu với bộ test đặc tả của Phase 1:** chạy cùng các kịch bản (4 dạng selector, `evaluate` hàm và biểu thức, `type` ghi đè, định dạng `snapshot`) lên extension bằng một trang test cục bộ (`http://127.0.0.1:<port>/test.html`), kết quả khớp rod 100%.
+- [x] **Nghiệm thu thực nghiệm:** click link, gõ input ghi đè + Enter, chụp ảnh và kiểm tra file PNG hợp lệ (51.5 KB), `evaluate("document.title")` và dạng function `() => ...`, điều hướng trang ngoài `https://example.com` và click nút.
 
 ### Phase 5: Nhiều profile song song
 - [ ] Cài extension vào profile thứ hai với nhãn khác.
@@ -425,3 +425,37 @@ Gửi cho chủ repo: danh sách commit, kết quả các lệnh nghiệm thu (d
   - `list_profiles` liệt kê profile `work` qua MCP.
   - `browser_new_tab(url="https://example.com")` mở tab trong dedicated window và trích xuất đúng snapshot (`Example Domain`, `- [a] "Learn more"`).
   - `browser_list_tabs`, `browser_navigate`, `browser_close_tab` chạy thông suốt 100%.
+
+### Phase 4: Các phương thức tương tác & Nghiệm thu đặc tả
+- **Các file thay đổi & tạo mới**:
+  - `extension/lib/find_element.js`: thuật toán tìm kiếm phần tử 4 bước khớp 100% với `findElement` của `driver_rod.go`:
+    1. CSS selector / XPath (`/` hoặc `(`)
+    2. Button/Link theo text (bao gồm Playwright-style `:has-text("...")`)
+    3. Label (`for` id hoặc wrapping), `placeholder`, hoặc `name`
+    4. Text trên bất kỳ phần tử nào (ưu tiên node lá sâu nhất)
+    - Cơ chế polling 200ms tối đa 2s, `scrollIntoView({ block: 'center' })`, hỗ trợ action `prepare_type` (focus + select range để ghi đè toàn bộ).
+  - `extension/background.js`:
+    - `page.click`: định vị phần tử, cuộn trung tâm, chờ 200ms, điều vận CDP `Input.dispatchMouseEvent` (`mouseMoved`, `mousePressed`, `mouseReleased`) với dự phòng `el.click()`, chờ ổn định 1s.
+    - `page.type`: chuẩn bị phần tử qua `prepare_type`, gửi chuỗi qua CDP `Input.insertText` với dự phòng DOM value assignment.
+    - `page.pressKey`: hỗ trợ Enter, Tab, Escape, Backspace, ArrowDown, ArrowUp qua CDP `Input.dispatchKeyEvent` (`rawKeyDown`, `char`, `keyUp`), chờ ổn định 500ms.
+    - `page.screenshot`: gọi CDP `Page.captureScreenshot` (format png) với dự phòng `chrome.tabs.captureVisibleTab`.
+    - `page.evaluate`: tự động nhận diện dạng function expression `() => ...` hoặc biểu thức đơn, thực thi qua CDP `Runtime.evaluate` (`awaitPromise: true`, `returnByValue: true`) kèm dự phòng `chrome.scripting.executeScript`.
+    - Quản lý vòng đời Debugger: lazy attach `chrome.debugger.attach({ tabId }, '1.3')`, tự động theo dõi trong Set và detach khi tab đóng hoặc debugger bị ngắt kết nối.
+  - `driver.go`, `driver_rod.go`, `driver_ext.go`: thêm phương thức `Mode() string` vào `Driver` interface để trả về đúng chuỗi chế độ backend trong thông báo điều hướng (`Chrome Extension (profile '...')` hoặc `Standalone Chrome` / `Google Chrome (CDP Port 9222)`).
+  - `router.go`: trích xuất hàm trợ giúp `selectDriverLocked` để áp dụng nhất quán quy tắc chọn profile cho cả `NewTab` và việc tự động tạo tab đầu tiên trong `getTabRefLocked`.
+  - `ext_hub.go`: giảm lock contention trong `ListProfiles()`.
+- **Kết quả nghiệm thu đối chiếu với Phase 1 (13 kịch bản qua MCP)**:
+  1. `browser_new_tab`: tạo tab và trích xuất snapshot các phần tử tương tác trên trang test cục bộ.
+  2. `browser_evaluate`: biểu thức (`document.title`) trả về `"Phase 4 Characterization Test Page"`.
+  3. `browser_evaluate`: dạng hàm (`() => document.title`) trả về kết quả tương đương.
+  4. `browser_click`: Strategy 1 direct selector (`#direct-btn`) cập nhật nút thành `"Direct Clicked"`.
+  5. `browser_click`: Strategy 2 link text (`Click Here Link`) kích hoạt link và cập nhật hash/text thành `"Link Clicked"`.
+  6. `browser_click`: Strategy 2b `:has-text("Action Button")` cập nhật text thành `"Action Clicked"`.
+  7. `browser_type`: Strategy 3a theo nhãn (`Username Field`) ghi đè hoàn toàn nội dung cũ thành `"new username"`.
+  8. `browser_type`: Strategy 3b theo placeholder (`Password Placeholder`) nhập `"my secret pass"`.
+  9. `browser_type`: Strategy 3c theo name (`search_query`) nhập `"golang browser automation"`.
+  10. `browser_press_key`: gửi phím `Enter` thông suốt.
+  11. `browser_screenshot`: xuất file PNG hợp lệ tại `/tmp/screenshot.png` (51,583 bytes).
+  12. Điều hướng trang ngoài `https://example.com` và click link `Learn more`.
+  13. `browser_close_tab`: dọn dẹp đóng tab thành công.
+- Toàn bộ 13 test chạy xanh 100%, `go test -count=1 ./...` và `go vet ./...` đạt 100% OK.

@@ -24,6 +24,10 @@ func (d *ExtDriver) Name() string {
 	return "ext:" + d.profile
 }
 
+func (d *ExtDriver) Mode() string {
+	return fmt.Sprintf("Chrome Extension (profile '%s')", d.profile)
+}
+
 func (d *ExtDriver) session() (*ExtensionSession, error) {
 	s, ok := d.hub.GetSession(d.profile)
 	if !ok {

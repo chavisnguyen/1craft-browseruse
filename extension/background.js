@@ -1,4 +1,5 @@
 import { snapshotFn } from './lib/snapshot.js';
+import { findElementInPage } from './lib/find_element.js';
 
 let ws = null;
 let pingInterval = null;
@@ -8,6 +9,7 @@ const MAX_RECONNECT_DELAY = 30000;
 
 let agentWindowId = null;
 const agentTabIds = new Set();
+const attachedDebuggers = new Set();
 
 // Helper to generate UUID v4
 function generateUUID() {
@@ -76,9 +78,38 @@ async function getOrCreateWindow(windowMode) {
   return agentWindowId;
 }
 
-// Clean up closed tabs from our set
+// Debugger lifecycle management
+async function ensureDebuggerAttached(tabId) {
+  if (attachedDebuggers.has(tabId)) {
+    return true;
+  }
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+    attachedDebuggers.add(tabId);
+    return true;
+  } catch (err) {
+    console.warn(`Debugger attach failed on tab ${tabId}:`, err);
+    return false;
+  }
+}
+
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (source.tabId) {
+    attachedDebuggers.delete(source.tabId);
+  }
+});
+
+// Clean up closed tabs from our sets
 chrome.tabs.onRemoved.addListener((tabId) => {
   agentTabIds.delete(tabId);
+  if (attachedDebuggers.has(tabId)) {
+    try {
+      chrome.debugger.detach({ tabId });
+    } catch {
+      // ignore
+    }
+    attachedDebuggers.delete(tabId);
+  }
 });
 
 chrome.windows.onRemoved.addListener((windowId) => {
@@ -86,6 +117,15 @@ chrome.windows.onRemoved.addListener((windowId) => {
     agentWindowId = null;
   }
 });
+
+function isRestrictedUrl(url) {
+  if (!url) return false;
+  return (
+    url.startsWith('chrome://') ||
+    url.startsWith('chrome-extension://') ||
+    url.startsWith('https://chromewebstore.google.com')
+  );
+}
 
 // Helper to wait for a tab to finish loading
 async function waitForTabLoad(tabId, timeoutMs = 30000) {
@@ -98,7 +138,7 @@ async function waitForTabLoad(tabId, timeoutMs = 30000) {
     // ignore
   }
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     let timer = null;
 
     const listener = (updatedTabId, changeInfo, tab) => {
@@ -121,6 +161,29 @@ async function waitForTabLoad(tabId, timeoutMs = 30000) {
 // Sleep helper
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// Map key string to CDP Key details
+function getKeyDetails(keyStr) {
+  switch ((keyStr || '').toLowerCase()) {
+    case 'enter':
+      return { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
+    case 'tab':
+      return { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 };
+    case 'escape':
+    case 'esc':
+      return { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 };
+    case 'backspace':
+      return { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 };
+    case 'arrowdown':
+    case 'down':
+      return { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
+    case 'arrowup':
+    case 'up':
+      return { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 };
+    default:
+      return { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
+  }
 }
 
 // Request handlers
@@ -149,6 +212,7 @@ async function handleRequest(msg) {
 
         const updated = await chrome.tabs.get(tab.id);
         return {
+          type: 'res',
           id,
           result: {
             tabId: updated.id,
@@ -159,8 +223,16 @@ async function handleRequest(msg) {
       }
 
       case 'tabs.list': {
+        const requested =
+          Array.isArray(params.tabIds) && params.tabIds.length > 0
+            ? new Set(params.tabIds.map((tid) => Number(tid)))
+            : null;
+
         const tabs = [];
         for (const tabId of Array.from(agentTabIds)) {
+          if (requested && !requested.has(tabId)) {
+            continue;
+          }
           try {
             const t = await chrome.tabs.get(tabId);
             tabs.push({
@@ -173,6 +245,7 @@ async function handleRequest(msg) {
           }
         }
         return {
+          type: 'res',
           id,
           result: { tabs },
         };
@@ -186,7 +259,15 @@ async function handleRequest(msg) {
           // tab might already be closed
         }
         agentTabIds.delete(tabId);
-        return { id, result: {} };
+        if (attachedDebuggers.has(tabId)) {
+          try {
+            chrome.debugger.detach({ tabId });
+          } catch {
+            // ignore
+          }
+          attachedDebuggers.delete(tabId);
+        }
+        return { type: 'res', id, result: {} };
       }
 
       case 'page.navigate': {
@@ -194,7 +275,7 @@ async function handleRequest(msg) {
         await chrome.tabs.update(tabId, { url: params.url });
         await waitForTabLoad(tabId, 30000);
         await sleep(1000); // 1s settling time matching rod backend
-        return { id, result: {} };
+        return { type: 'res', id, result: {} };
       }
 
       case 'page.snapshot': {
@@ -202,23 +283,19 @@ async function handleRequest(msg) {
         const tab = await chrome.tabs.get(tabId);
         if (!tab) {
           return {
+            type: 'res',
             id,
             error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
           };
         }
 
-        // Check for restricted URLs
-        const url = tab.url || '';
-        if (
-          url.startsWith('chrome://') ||
-          url.startsWith('chrome-extension://') ||
-          url.startsWith('https://chromewebstore.google.com')
-        ) {
+        if (isRestrictedUrl(tab.url)) {
           return {
+            type: 'res',
             id,
             error: {
               code: 'restricted_page',
-              message: `Cannot snapshot restricted page: ${url}`,
+              message: `Cannot snapshot restricted page: ${tab.url}`,
             },
           };
         }
@@ -230,6 +307,7 @@ async function handleRequest(msg) {
 
         const elements = results && results[0] ? results[0].result : '';
         return {
+          type: 'res',
           id,
           result: {
             url: tab.url || '',
@@ -239,8 +317,385 @@ async function handleRequest(msg) {
         };
       }
 
+      case 'page.click': {
+        const tabId = params.tabId;
+        const selector = params.selector;
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        if (isRestrictedUrl(tab.url)) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'restricted_page',
+              message: `Cannot interact with restricted page: ${tab.url}`,
+            },
+          };
+        }
+
+        // Find element in page
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: findElementInPage,
+          args: [selector, 'find', ''],
+        });
+
+        const findRes = results && results[0] ? results[0].result : null;
+        if (!findRes || !findRes.found) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'element_not_found',
+              message: (findRes && findRes.error) || `element not found: no element matching '${selector}'`,
+            },
+          };
+        }
+
+        await sleep(200); // 200ms settling time after scrollIntoView
+
+        // Try clicking via debugger
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        let clicked = false;
+        if (hasDebugger) {
+          try {
+            const { x, y } = findRes.center;
+            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+              type: 'mouseMoved',
+              x,
+              y,
+            });
+            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+              type: 'mousePressed',
+              x,
+              y,
+              button: 'left',
+              clickCount: 1,
+            });
+            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
+              type: 'mouseReleased',
+              x,
+              y,
+              button: 'left',
+              clickCount: 1,
+            });
+            clicked = true;
+          } catch (e) {
+            console.warn('Debugger click failed, trying fallback:', e);
+          }
+        }
+
+        if (!clicked) {
+          // Fallback to direct DOM el.click()
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: findElementInPage,
+            args: [selector, 'click_fallback', ''],
+          });
+        }
+
+        await sleep(1000); // 1s settling time matching rod backend
+        return { type: 'res', id, result: {} };
+      }
+
+      case 'page.type': {
+        const tabId = params.tabId;
+        const selector = params.selector;
+        const text = params.text || '';
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        if (isRestrictedUrl(tab.url)) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'restricted_page',
+              message: `Cannot interact with restricted page: ${tab.url}`,
+            },
+          };
+        }
+
+        // Prepare element: focus and select all existing text to overwrite
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: findElementInPage,
+          args: [selector, 'prepare_type', ''],
+        });
+
+        const findRes = results && results[0] ? results[0].result : null;
+        if (!findRes || !findRes.found) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'element_not_found',
+              message: (findRes && findRes.error) || `element not found: no element matching '${selector}'`,
+            },
+          };
+        }
+
+        // Try inserting text via debugger (replaces selection)
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        let typed = false;
+        if (hasDebugger) {
+          try {
+            await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text });
+            typed = true;
+          } catch (e) {
+            console.warn('Debugger insertText failed, trying fallback:', e);
+          }
+        }
+
+        if (!typed) {
+          // Fallback: direct value assignment + event dispatching
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: findElementInPage,
+            args: [selector, 'type_fallback', text],
+          });
+        }
+
+        return { type: 'res', id, result: {} };
+      }
+
+      case 'page.pressKey': {
+        const tabId = params.tabId;
+        const key = params.key || 'Enter';
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        if (isRestrictedUrl(tab.url)) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'restricted_page',
+              message: `Cannot interact with restricted page: ${tab.url}`,
+            },
+          };
+        }
+
+        const kd = getKeyDetails(key);
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        let pressed = false;
+
+        if (hasDebugger) {
+          try {
+            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+              type: 'rawKeyDown',
+              key: kd.key,
+              code: kd.code,
+              windowsVirtualKeyCode: kd.windowsVirtualKeyCode,
+            });
+            if (kd.text) {
+              await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+                type: 'char',
+                text: kd.text,
+              });
+            }
+            await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
+              type: 'keyUp',
+              key: kd.key,
+              code: kd.code,
+              windowsVirtualKeyCode: kd.windowsVirtualKeyCode,
+            });
+            pressed = true;
+          } catch (e) {
+            console.warn('Debugger dispatchKeyEvent failed:', e);
+          }
+        }
+
+        if (!pressed) {
+          // Fallback via DOM KeyboardEvent dispatch on active element
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: (kName, kCode) => {
+              const target = document.activeElement || document.body;
+              target.dispatchEvent(new KeyboardEvent('keydown', { key: kName, code: kCode, bubbles: true }));
+              target.dispatchEvent(new KeyboardEvent('keyup', { key: kName, code: kCode, bubbles: true }));
+            },
+            args: [kd.key, kd.code],
+          });
+        }
+
+        await sleep(500); // 500ms settling time matching rod backend
+        return { type: 'res', id, result: {} };
+      }
+
+      case 'page.screenshot': {
+        const tabId = params.tabId;
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        if (isRestrictedUrl(tab.url)) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'restricted_page',
+              message: `Cannot capture restricted page: ${tab.url}`,
+            },
+          };
+        }
+
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        let base64Png = '';
+
+        if (hasDebugger) {
+          try {
+            const shot = await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', {
+              format: 'png',
+            });
+            base64Png = shot.data;
+          } catch (e) {
+            console.warn('Debugger captureScreenshot failed, trying fallback:', e);
+          }
+        }
+
+        if (!base64Png) {
+          // Fallback to captureVisibleTab
+          try {
+            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+            base64Png = dataUrl.replace(/^data:image\/png;base64,/, '');
+          } catch (e) {
+            return {
+              type: 'res',
+              id,
+              error: { code: 'debugger_unavailable', message: `Failed to capture screenshot: ${e.message}` },
+            };
+          }
+        }
+
+        return {
+          type: 'res',
+          id,
+          result: { pngBase64: base64Png },
+        };
+      }
+
+      case 'page.evaluate': {
+        const tabId = params.tabId;
+        const script = params.script || '';
+        const tab = await chrome.tabs.get(tabId);
+        if (!tab) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'tab_not_found', message: `Tab ${tabId} not found` },
+          };
+        }
+
+        if (isRestrictedUrl(tab.url)) {
+          return {
+            type: 'res',
+            id,
+            error: {
+              code: 'restricted_page',
+              message: `Cannot evaluate on restricted page: ${tab.url}`,
+            },
+          };
+        }
+
+        // Support both function form: () => document.title and expression: document.title
+        const funcRegex = /^\s*(async\s+)?(function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/;
+        let expression = script.trim();
+        if (funcRegex.test(expression)) {
+          expression = `(${expression})()`;
+        }
+
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        if (hasDebugger) {
+          try {
+            const evalRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+              expression,
+              awaitPromise: true,
+              returnByValue: true,
+            });
+
+            if (evalRes.exceptionDetails) {
+              const errMsg =
+                evalRes.exceptionDetails.exception?.description ||
+                evalRes.exceptionDetails.text ||
+                'script_error';
+              return {
+                type: 'res',
+                id,
+                error: { code: 'script_error', message: errMsg },
+              };
+            }
+
+            return {
+              type: 'res',
+              id,
+              result: {
+                value: evalRes.result ? evalRes.result.value : null,
+              },
+            };
+          } catch (e) {
+            console.warn('Debugger Runtime.evaluate failed, trying fallback:', e);
+          }
+        }
+
+        // Fallback via scripting in MAIN world
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: { tabId },
+            world: 'MAIN',
+            func: (codeStr) => {
+              const fnRegex = /^\s*(async\s+)?(function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/;
+              if (fnRegex.test(codeStr)) {
+                return (0, eval)(`(${codeStr})()`);
+              }
+              return (0, eval)(codeStr);
+            },
+            args: [script],
+          });
+
+          return {
+            type: 'res',
+            id,
+            result: {
+              value: results && results[0] ? results[0].result : null,
+            },
+          };
+        } catch (e) {
+          return {
+            type: 'res',
+            id,
+            error: { code: 'script_error', message: e.message || String(e) },
+          };
+        }
+      }
+
       default:
         return {
+          type: 'res',
           id,
           error: {
             code: 'internal_error',
@@ -250,6 +705,7 @@ async function handleRequest(msg) {
     }
   } catch (err) {
     return {
+      type: 'res',
       id,
       error: {
         code: 'internal_error',
@@ -313,11 +769,13 @@ async function connect() {
     if (msg.type === 'hello_error') {
       setBadge('!', '#e74c3c');
       stopPing();
+      const code = msg.code || msg.error;
       // Fatal handshake errors: don't loop endlessly
       if (
-        msg.error === 'bad_token' ||
-        msg.error === 'bad_label' ||
-        msg.error === 'label_in_use'
+        code === 'bad_token' ||
+        code === 'bad_label' ||
+        code === 'label_in_use' ||
+        code === 'bad_protocol'
       ) {
         return;
       }

@@ -39,38 +39,41 @@ func NewRouter(rod *RodDriver, hub *ExtHub) *Router {
 	return r
 }
 
+// selectDriverLocked resolves the backend for a profile request. It must be called with r.mu held.
+func (r *Router) selectDriverLocked(profile string) (Driver, string, error) {
+	if profile != "" {
+		if r.hub == nil {
+			return nil, "", fmt.Errorf("profile '%s' is not online", profile)
+		}
+		if _, ok := r.hub.GetSession(profile); !ok {
+			return nil, "", fmt.Errorf("profile '%s' is not online", profile)
+		}
+		return NewExtDriver(profile, r.hub), profile, nil
+	}
+
+	var online []string
+	if r.hub != nil {
+		online = r.hub.OnlineProfiles()
+		sort.Strings(online)
+	}
+	switch len(online) {
+	case 0:
+		// Fallback to rod backend
+		return r.rod, "", nil
+	case 1:
+		return NewExtDriver(online[0], r.hub), online[0], nil
+	default:
+		return nil, "", fmt.Errorf("multiple extension profiles online (%s). Please specify 'profile' in 'browser_new_tab'", strings.Join(online, ", "))
+	}
+}
+
 func (r *Router) NewTab(ctx context.Context, url string, profile string) (string, PageSummary, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	var driver Driver
-	selectedProfile := profile
-
-	if profile != "" {
-		if r.hub == nil {
-			return "", PageSummary{}, fmt.Errorf("profile '%s' is not online", profile)
-		}
-		if _, ok := r.hub.GetSession(profile); !ok {
-			return "", PageSummary{}, fmt.Errorf("profile '%s' is not online", profile)
-		}
-		driver = NewExtDriver(profile, r.hub)
-	} else {
-		var online []string
-		if r.hub != nil {
-			online = r.hub.OnlineProfiles()
-			sort.Strings(online)
-		}
-		switch len(online) {
-		case 0:
-			// Fallback to rod backend
-			driver = r.rod
-			selectedProfile = ""
-		case 1:
-			selectedProfile = online[0]
-			driver = NewExtDriver(selectedProfile, r.hub)
-		default:
-			return "", PageSummary{}, fmt.Errorf("multiple extension profiles online (%s). Please specify 'profile' in 'browser_new_tab'", strings.Join(online, ", "))
-		}
+	driver, selectedProfile, err := r.selectDriverLocked(profile)
+	if err != nil {
+		return "", PageSummary{}, err
 	}
 
 	handle, err := driver.NewTab(ctx, url)
@@ -141,8 +144,11 @@ func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, err
 		}
 	}
 
-	// 4. Create the first tab
-	driver := r.rod
+	// 4. Create the first tab using profile selection rules
+	driver, selectedProfile, err := r.selectDriverLocked("")
+	if err != nil {
+		return tabRef{}, err
+	}
 	handle, err := driver.NewTab(ctx, "")
 	if err != nil {
 		return tabRef{}, err
@@ -151,9 +157,10 @@ func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, err
 	r.counter++
 	newTabID := fmt.Sprintf("tab-%d", r.counter)
 	ref := tabRef{
-		tabID:  newTabID,
-		driver: driver,
-		handle: handle,
+		tabID:   newTabID,
+		driver:  driver,
+		handle:  handle,
+		profile: selectedProfile,
 	}
 	r.tabs[newTabID] = ref
 	r.activeTab = newTabID
@@ -246,10 +253,7 @@ func (r *Router) Navigate(ctx context.Context, tabID, url string) (string, strin
 		return ref.tabID, "", PageSummary{}, err
 	}
 
-	mode := "Google Chrome (CDP Port 9222)"
-	if !r.rod.IsCDP() {
-		mode = "Standalone Chrome"
-	}
+	mode := ref.driver.Mode()
 
 	summary, err := ref.driver.Snapshot(ctx, ref.handle)
 	if err != nil {
