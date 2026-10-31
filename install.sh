@@ -10,13 +10,15 @@ MODE="${1:-sse}"
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$TOOL_DIR/bin/browseruse"
 SSE_URL="http://localhost:3025/mcp"
+SERVER_NAME="1craft-browseruse"
+OLD_NAME="browseruse"
 
 if [ ! -f "$BIN_PATH" ]; then
     echo "⚙️ Building binary first..."
     (cd "$TOOL_DIR" && go build -o "$BIN_PATH" .)
 fi
 
-echo "🔧 Configuring browseruse MCP Server in [$MODE] mode..."
+echo "🔧 Configuring $SERVER_NAME MCP Server in [$MODE] mode..."
 if [ "$MODE" = "sse" ]; then
     echo "   SSE URL: $SSE_URL (Run 'make daemon' to start server)"
 else
@@ -40,13 +42,14 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
+data["mcpServers"].pop("$OLD_NAME", None)
 if "$MODE" == "sse":
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "disabled": False,
         "serverUrl": "$SSE_URL"
     }
 else:
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "command": "$BIN_PATH"
     }
 
@@ -82,13 +85,14 @@ else:
     data = {}
 
 data.setdefault("mcp", {}).setdefault("servers", {})
+data["mcp"]["servers"].pop("$OLD_NAME", None)
 if "$MODE" == "sse":
-    data["mcp"]["servers"]["browseruse"] = {
+    data["mcp"]["servers"]["$SERVER_NAME"] = {
         "type": "remote",
         "url": "$SSE_URL"
     }
 else:
-    data["mcp"]["servers"]["browseruse"] = {
+    data["mcp"]["servers"]["$SERVER_NAME"] = {
         "type": "stdio",
         "command": "$BIN_PATH"
     }
@@ -115,13 +119,14 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
+data["mcpServers"].pop("$OLD_NAME", None)
 if "$MODE" == "sse":
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "type": "http",
         "url": "$SSE_URL"
     }
 else:
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "command": "$BIN_PATH"
     }
 
@@ -149,13 +154,14 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
+data["mcpServers"].pop("$OLD_NAME", None)
 if "$MODE" == "sse":
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "url": "$SSE_URL",
         "disabled": False
     }
 else:
-    data["mcpServers"]["browseruse"] = {
+    data["mcpServers"]["$SERVER_NAME"] = {
         "command": "$BIN_PATH",
         "disabled": False
     }
@@ -182,7 +188,8 @@ else:
     data = {}
 
 data.setdefault("mcpServers", {})
-data["mcpServers"]["browseruse"] = {
+data["mcpServers"].pop("$OLD_NAME", None)
+data["mcpServers"]["$SERVER_NAME"] = {
     "command": "$BIN_PATH"
 }
 
