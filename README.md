@@ -4,6 +4,7 @@
 
 [![Latest Release](https://img.shields.io/github/v/release/chavisnguyen/1craft-browseruse?style=flat-square&color=blue)](https://github.com/chavisnguyen/1craft-browseruse/releases)
 [![Homebrew](https://img.shields.io/badge/Homebrew-chavisnguyen%2Fbrowseruse-orange?style=flat-square&logo=homebrew)](https://github.com/chavisnguyen/homebrew-browseruse)
+[![CI](https://img.shields.io/github/actions/workflow/status/chavisnguyen/1craft-browseruse/ci.yml?branch=master&style=flat-square&label=CI)](https://github.com/chavisnguyen/1craft-browseruse/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)

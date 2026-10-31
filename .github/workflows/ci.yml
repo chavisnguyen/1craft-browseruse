@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    name: Lint & Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Validate Extension Manifest and Locales JSON
+        run: |
+          python3 -c "import json; json.load(open('extension/manifest.json'))"
+          python3 -c "import json; json.load(open('extension/_locales/en/messages.json'))"
+          python3 -c "import json; json.load(open('extension/_locales/vi/messages.json'))"
+          echo "✅ All JSON files are syntactically valid."
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Run Tests
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -v -count=1 ./... 2>&1 | tee test-output.txt
+
+      - name: Publish Test Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "### 🧪 Go Test Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "--- (PASS|FAIL):|ok\s+browseruse|FAIL\s+browseruse" test-output.txt | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  cross-compile:
+    name: Build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: amd64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache: true
+
+      - name: Cross-compile
+        run: |
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -v -ldflags="-s -w" -o /tmp/build-check-${{ matrix.goos }}-${{ matrix.goarch }} .
+          echo "✅ Successfully built for ${{ matrix.goos }}/${{ matrix.goarch }}"
