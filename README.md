@@ -2,7 +2,7 @@
 
 > **Control your browser with your AI**
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/chavisnguyen/1craft-browseruse?style=flat-square)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go)](https://golang.org)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue?style=flat-square)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![RAM Usage](https://img.shields.io/badge/RAM-~12MB-brightgreen?style=flat-square)](README.md)
