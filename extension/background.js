@@ -812,7 +812,7 @@ async function connect() {
       profile: config.label,
       instanceId: config.instanceId,
       token: config.token,
-      version: '1.1.0',
+      version: '1.2.1',
       protocol: 1,
     };
     ws.send(JSON.stringify(hello));
@@ -827,14 +827,14 @@ async function connect() {
     }
 
     if (msg.type === 'hello_ok') {
-      setBadge('ON', '#2ecc71');
+      setBadge('', ''); // Clean icon with no badge obscuring the logo
       reconnectDelay = 1000;
       startPing();
       return;
     }
 
     if (msg.type === 'hello_error') {
-      setBadge('!', '#e74c3c');
+      setBadge('!', '#d93025');
       stopPing();
       const code = msg.code || msg.error;
       if (code === 'label_in_use') {
@@ -870,7 +870,7 @@ async function connect() {
 
   ws.onclose = () => {
     stopPing();
-    setBadge('OFF', '#95a5a6');
+    setBadge('', '');
     scheduleReconnect();
   };
 
