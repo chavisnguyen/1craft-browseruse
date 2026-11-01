@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	Version          = "1.2.2"
+	Version          = "1.3.0"
 	defaultRodDriver = NewRodDriver()
 	defaultExtHub    = NewExtHub(30 * time.Second)
 	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)
@@ -195,22 +195,173 @@ func setupMCPServer() *server.MCPServer {
 
 	// 9. browser_screenshot
 	shotTool := mcp.NewTool("browser_screenshot",
-		mcp.WithDescription("Capture screenshot of a tab and save to disk."),
+		mcp.WithDescription("Capture screenshot of a tab and save to disk. Supports optional visual annotations (Set-of-Mark) highlighting interactive elements."),
 		mcp.WithString("filename", mcp.Description("Optional file path (default /tmp/screenshot.png)")),
+		mcp.WithBoolean("annotate", mcp.Description("If true, overlays numbered badges [1], [2], ... on interactive elements before capturing")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID")),
 	)
 	s.AddTool(shotTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		filename := req.GetString("filename", "screenshot.png")
+		annotate := req.GetBool("annotate", false)
 		tabID := req.GetString("tab_id", "")
 
-		actualTabID, savedPath, err := defaultRouter.Screenshot(ctx, tabID, filename)
+		actualTabID, savedPath, err := defaultRouter.Screenshot(ctx, tabID, filename, annotate)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to take screenshot: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("📸 Screenshot of `%s` saved to `%s`.", actualTabID, savedPath)), nil
+		annMsg := ""
+		if annotate {
+			annMsg = " (with Set-of-Mark visual annotations)"
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("📸 Screenshot of `%s` saved to `%s`%s.", actualTabID, savedPath, annMsg)), nil
 	})
 
-	// 10. browser_evaluate
+	// 10. browser_hover
+	hoverTool := mcp.NewTool("browser_hover",
+		mcp.WithDescription("Hover the mouse over an element by CSS selector, button text, or aria-label. Displays the virtual cursor and triggers dropdown menus/tooltips."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, button text, or link text to hover over")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(hoverTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		selector := req.GetString("selector", "")
+		tabID := req.GetString("tab_id", "")
+
+		actualTabID, summary, err := defaultRouter.Hover(ctx, tabID, selector)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to hover element: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Hovered over `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
+	})
+
+	// 11. browser_select
+	selectTool := mcp.NewTool("browser_select",
+		mcp.WithDescription("Select an option in a dropdown (<select>) element by option value or text."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for the <select> element")),
+		mcp.WithString("value", mcp.Required(), mcp.Description("Option value or visible text to select")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(selectTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		selector := req.GetString("selector", "")
+		value := req.GetString("value", "")
+		tabID := req.GetString("tab_id", "")
+
+		actualTabID, summary, err := defaultRouter.Select(ctx, tabID, selector, value)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to select option: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Selected `%s` on `%s` (%s).\n\n%s", value, selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
+	})
+
+	// 12. browser_wait_for
+	waitForTool := mcp.NewTool("browser_wait_for",
+		mcp.WithDescription("Wait for an element to appear, become visible, or disappear. Essential for Single Page Apps and dynamic content."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, button text, or link text")),
+		mcp.WithNumber("timeout_ms", mcp.Description("Timeout in milliseconds (default 5000, max 30000)")),
+		mcp.WithString("state", mcp.Description("State to wait for: 'visible' (default), 'hidden', or 'attached'")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(waitForTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		selector := req.GetString("selector", "")
+		timeoutMs := req.GetInt("timeout_ms", 5000)
+		state := req.GetString("state", "visible")
+		tabID := req.GetString("tab_id", "")
+
+		actualTabID, err := defaultRouter.WaitFor(ctx, tabID, selector, timeoutMs, state)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Wait failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Element `%s` is now %s on `%s`.", selector, state, actualTabID)), nil
+	})
+
+	// 13. browser_upload_file
+	uploadTool := mcp.NewTool("browser_upload_file",
+		mcp.WithDescription("Upload one or more local files to an <input type='file'> element."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for the file input")),
+		mcp.WithString("files", mcp.Required(), mcp.Description("Comma-separated absolute file paths or JSON array of paths")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(uploadTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		selector := req.GetString("selector", "")
+		filesRaw := req.GetString("files", "")
+		tabID := req.GetString("tab_id", "")
+
+		var filePaths []string
+		if strings.HasPrefix(strings.TrimSpace(filesRaw), "[") {
+			_ = json.Unmarshal([]byte(filesRaw), &filePaths)
+		} else {
+			for _, p := range strings.Split(filesRaw, ",") {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					filePaths = append(filePaths, p)
+				}
+			}
+		}
+
+		if len(filePaths) == 0 {
+			return mcp.NewToolResultError("No files specified"), nil
+		}
+
+		actualTabID, err := defaultRouter.UploadFile(ctx, tabID, selector, filePaths)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to upload files: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Uploaded %d file(s) to `%s` on `%s`.", len(filePaths), selector, actualTabID)), nil
+	})
+
+	// 14. browser_drag_and_drop
+	dragTool := mcp.NewTool("browser_drag_and_drop",
+		mcp.WithDescription("Drag an element and drop it onto another element. Displays virtual cursor moving smoothly across elements."),
+		mcp.WithString("from", mcp.Required(), mcp.Description("Source element selector or text")),
+		mcp.WithString("to", mcp.Required(), mcp.Description("Target element selector or text")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(dragTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		from := req.GetString("from", "")
+		to := req.GetString("to", "")
+		tabID := req.GetString("tab_id", "")
+
+		actualTabID, summary, err := defaultRouter.DragAndDrop(ctx, tabID, from, to)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Drag and drop failed: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Dragged `%s` to `%s` on `%s`.\n\n%s", from, to, actualTabID, formatPageSummary(actualTabID, summary))), nil
+	})
+
+	// 15. browser_activate_tab
+	activateTabTool := mcp.NewTool("browser_activate_tab",
+		mcp.WithDescription("Bring a tab and its browser window to the visual foreground on screen."),
+		mcp.WithString("tab_id", mcp.Required(), mcp.Description("Tab ID to activate and focus (e.g. 'tab-1')")),
+	)
+	s.AddTool(activateTabTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		tabID := req.GetString("tab_id", "")
+		actualTabID, err := defaultRouter.ActivateTab(ctx, tabID)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to activate tab: %v", err)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Tab `%s` is now focused in foreground.", actualTabID)), nil
+	})
+
+	// 16. browser_console_logs
+	consoleLogsTool := mcp.NewTool("browser_console_logs",
+		mcp.WithDescription("Get captured JavaScript console logs, warnings, and errors from a tab. Essential for web debugging."),
+		mcp.WithBoolean("clear", mcp.Description("Whether to clear logs after reading (default true)")),
+		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
+	)
+	s.AddTool(consoleLogsTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		clear := req.GetBool("clear", true)
+		tabID := req.GetString("tab_id", "")
+
+		actualTabID, logs, err := defaultRouter.ConsoleLogs(ctx, tabID, clear)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to get console logs: %v", err)), nil
+		}
+		if len(logs) == 0 {
+			return mcp.NewToolResultText(fmt.Sprintf("ℹ️ No new console logs on `%s`.", actualTabID)), nil
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("📋 Console logs on `%s` (%d entries):\n```\n%s\n```", actualTabID, len(logs), strings.Join(logs, "\n"))), nil
+	})
+
+	// 17. browser_evaluate
 	evalTool := mcp.NewTool("browser_evaluate",
 		mcp.WithDescription("Execute JavaScript code in a tab context."),
 		mcp.WithString("script", mcp.Required(), mcp.Description("JavaScript expression to evaluate")),

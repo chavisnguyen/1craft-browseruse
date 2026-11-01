@@ -297,6 +297,120 @@ func (r *Router) Click(ctx context.Context, tabID, selector string) (string, Pag
 	return ref.tabID, summary, nil
 }
 
+func (r *Router) Hover(ctx context.Context, tabID, selector string) (string, PageSummary, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", PageSummary{}, err
+	}
+
+	if err := ref.driver.Hover(ctx, ref.handle, selector); err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+
+	summary, err := ref.driver.Snapshot(ctx, ref.handle)
+	if err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+	return ref.tabID, summary, nil
+}
+
+func (r *Router) Select(ctx context.Context, tabID, selector, value string) (string, PageSummary, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", PageSummary{}, err
+	}
+
+	if err := ref.driver.Select(ctx, ref.handle, selector, value); err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+
+	summary, err := ref.driver.Snapshot(ctx, ref.handle)
+	if err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+	return ref.tabID, summary, nil
+}
+
+func (r *Router) WaitFor(ctx context.Context, tabID, selector string, timeoutMs int, state string) (string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+
+	if err := ref.driver.WaitFor(ctx, ref.handle, selector, timeoutMs, state); err != nil {
+		return ref.tabID, err
+	}
+	return ref.tabID, nil
+}
+
+func (r *Router) UploadFile(ctx context.Context, tabID, selector string, files []string) (string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+
+	if err := ref.driver.UploadFile(ctx, ref.handle, selector, files); err != nil {
+		return ref.tabID, err
+	}
+	return ref.tabID, nil
+}
+
+func (r *Router) DragAndDrop(ctx context.Context, tabID, fromSelector, toSelector string) (string, PageSummary, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", PageSummary{}, err
+	}
+
+	if err := ref.driver.DragAndDrop(ctx, ref.handle, fromSelector, toSelector); err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+
+	summary, err := ref.driver.Snapshot(ctx, ref.handle)
+	if err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+	return ref.tabID, summary, nil
+}
+
+func (r *Router) ActivateTab(ctx context.Context, tabID string) (string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", err
+	}
+
+	if err := ref.driver.ActivateTab(ctx, ref.handle); err != nil {
+		return ref.tabID, err
+	}
+	return ref.tabID, nil
+}
+
+func (r *Router) ConsoleLogs(ctx context.Context, tabID string, clear bool) (string, []string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	logs, err := ref.driver.ConsoleLogs(ctx, ref.handle, clear)
+	if err != nil {
+		return ref.tabID, nil, err
+	}
+	return ref.tabID, logs, nil
+}
+
 func (r *Router) Type(ctx context.Context, tabID, selector, text string, pressEnter bool) (string, error) {
 	r.mu.Lock()
 	ref, err := r.getTabRefLocked(ctx, tabID)
@@ -345,7 +459,7 @@ func (r *Router) Scroll(ctx context.Context, tabID, direction string, amount int
 	return ref.tabID, nil
 }
 
-func (r *Router) Screenshot(ctx context.Context, tabID, filename string) (string, string, error) {
+func (r *Router) Screenshot(ctx context.Context, tabID, filename string, annotate bool) (string, string, error) {
 	if filename == "" {
 		filename = "screenshot.png"
 	}
@@ -360,7 +474,7 @@ func (r *Router) Screenshot(ctx context.Context, tabID, filename string) (string
 		return "", "", err
 	}
 
-	data, err := ref.driver.Screenshot(ctx, ref.handle)
+	data, err := ref.driver.Screenshot(ctx, ref.handle, annotate)
 	if err != nil {
 		return ref.tabID, "", fmt.Errorf("failed to take screenshot: %w", err)
 	}

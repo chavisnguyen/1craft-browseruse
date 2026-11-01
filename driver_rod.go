@@ -305,12 +305,227 @@ func (d *RodDriver) Click(ctx context.Context, handle, selector string) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 
+	if shape, sErr := el.Shape(); sErr == nil && shape != nil {
+		cx := shape.Box().X + shape.Box().Width/2
+		cy := shape.Box().Y + shape.Box().Height/2
+		_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, true)", jsShowVirtualCursor, cx, cy))
+	}
+
 	if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
 		return fmt.Errorf("failed to click element: %w", err)
 	}
 
 	time.Sleep(1 * time.Second)
 	return nil
+}
+
+func (d *RodDriver) Hover(ctx context.Context, handle, selector string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+
+	el, err := findElement(p, selector)
+	if err != nil {
+		return fmt.Errorf("element not found: %w", err)
+	}
+
+	if err := el.ScrollIntoView(); err == nil {
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	if shape, sErr := el.Shape(); sErr == nil && shape != nil {
+		cx := shape.Box().X + shape.Box().Width/2
+		cy := shape.Box().Y + shape.Box().Height/2
+		_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, false)", jsShowVirtualCursor, cx, cy))
+		_ = p.Mouse.MoveTo(proto.Point{X: cx, Y: cy})
+	}
+
+	_ = el.Hover()
+	time.Sleep(300 * time.Millisecond)
+	return nil
+}
+
+func (d *RodDriver) Select(ctx context.Context, handle, selector, value string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+
+	el, err := findElement(p, selector)
+	if err != nil {
+		return fmt.Errorf("element not found: %w", err)
+	}
+
+	_ = el.ScrollIntoView()
+	jsSelect := `(val) => {
+		let sel = this;
+		if (sel.tagName !== 'SELECT') sel = sel.querySelector('select') || sel.closest('select');
+		if (!sel || sel.tagName !== 'SELECT') return false;
+		val = (val || '').toLowerCase().trim();
+		for (let opt of sel.options) {
+			if (opt.value.toLowerCase() === val || opt.text.toLowerCase().includes(val)) {
+				sel.value = opt.value;
+				opt.selected = true;
+				sel.dispatchEvent(new Event('input', { bubbles: true }));
+				sel.dispatchEvent(new Event('change', { bubbles: true }));
+				return true;
+			}
+		}
+		return false;
+	}`
+	res, err := el.Eval(jsSelect, value)
+	if err != nil {
+		return fmt.Errorf("failed to select option: %w", err)
+	}
+	if res.Value.Val() == nil || !res.Value.Bool() {
+		return fmt.Errorf("no option matching '%s' found in select element", value)
+	}
+	time.Sleep(200 * time.Millisecond)
+	return nil
+}
+
+func (d *RodDriver) WaitFor(ctx context.Context, handle, selector string, timeoutMs int, state string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+
+	if timeoutMs <= 0 {
+		timeoutMs = 5000
+	}
+	if state == "" {
+		state = "visible"
+	}
+
+	start := time.Now()
+	for {
+		el, err := findElement(p, selector)
+		found := err == nil && el != nil
+		var isVis bool
+		if found {
+			vis, _ := el.Visible()
+			isVis = vis
+		}
+
+		if state == "attached" && found {
+			return nil
+		}
+		if state == "visible" && isVis {
+			return nil
+		}
+		if state == "hidden" && !isVis {
+			return nil
+		}
+
+		if time.Since(start) >= time.Duration(timeoutMs)*time.Millisecond {
+			return fmt.Errorf("timed out waiting %dms for '%s' to be %s", timeoutMs, selector, state)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (d *RodDriver) UploadFile(ctx context.Context, handle, selector string, files []string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		if _, err := os.Stat(f); err != nil {
+			return fmt.Errorf("file not found: %s", f)
+		}
+	}
+
+	el, err := findElement(p, selector)
+	if err != nil {
+		return fmt.Errorf("element not found: %w", err)
+	}
+
+	if err := el.SetFiles(files); err != nil {
+		return fmt.Errorf("failed to upload files: %w", err)
+	}
+	return nil
+}
+
+func (d *RodDriver) DragAndDrop(ctx context.Context, handle, fromSelector, toSelector string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+
+	fromEl, err := findElement(p, fromSelector)
+	if err != nil {
+		return fmt.Errorf("source element not found: %w", err)
+	}
+	toEl, err := findElement(p, toSelector)
+	if err != nil {
+		return fmt.Errorf("target element not found: %w", err)
+	}
+
+	_ = fromEl.ScrollIntoView()
+	time.Sleep(100 * time.Millisecond)
+
+	fromShape, err := fromEl.Shape()
+	if err != nil {
+		return fmt.Errorf("could not get source shape: %w", err)
+	}
+	toShape, err := toEl.Shape()
+	if err != nil {
+		return fmt.Errorf("could not get target shape: %w", err)
+	}
+
+	fx := fromShape.Box().X + fromShape.Box().Width/2
+	fy := fromShape.Box().Y + fromShape.Box().Height/2
+	tx := toShape.Box().X + toShape.Box().Width/2
+	ty := toShape.Box().Y + toShape.Box().Height/2
+
+	_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, true)", jsShowVirtualCursor, fx, fy))
+	_ = p.Mouse.MoveTo(proto.Point{X: fx, Y: fy})
+	_ = p.Mouse.Down(proto.InputMouseButtonLeft, 1)
+
+	steps := 5
+	for i := 1; i <= steps; i++ {
+		mx := fx + (tx-fx)*float64(i)/float64(steps)
+		my := fy + (ty-fy)*float64(i)/float64(steps)
+		_ = p.Mouse.MoveTo(proto.Point{X: mx, Y: my})
+		time.Sleep(30 * time.Millisecond)
+	}
+
+	_ = p.Mouse.Up(proto.InputMouseButtonLeft, 1)
+	_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, false)", jsShowVirtualCursor, tx, ty))
+	return nil
+}
+
+func (d *RodDriver) ActivateTab(ctx context.Context, handle string) error {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return err
+	}
+	_, err = p.Activate()
+	return err
+}
+
+func (d *RodDriver) ConsoleLogs(ctx context.Context, handle string, clear bool) ([]string, error) {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return nil, err
+	}
+	js := fmt.Sprintf(`() => {
+		const logs = window.__browseruse_logs || [];
+		const res = [...logs];
+		if (%t) window.__browseruse_logs = [];
+		return res;
+	}`, clear)
+	res, err := p.Eval(js)
+	if err != nil || res.Value.Val() == nil {
+		return []string{}, nil
+	}
+	var logs []string
+	for _, v := range res.Value.Arr() {
+		logs = append(logs, v.String())
+	}
+	return logs, nil
 }
 
 func (d *RodDriver) Type(ctx context.Context, handle, selector, text string) error {
@@ -387,10 +602,16 @@ func (d *RodDriver) Scroll(ctx context.Context, handle, direction string, amount
 	return err
 }
 
-func (d *RodDriver) Screenshot(ctx context.Context, handle string) ([]byte, error) {
+func (d *RodDriver) Screenshot(ctx context.Context, handle string, annotate bool) ([]byte, error) {
 	p, err := d.getPage(handle)
 	if err != nil {
 		return nil, err
+	}
+	if annotate {
+		_, _ = p.Eval(jsAnnotateElements)
+		defer func() {
+			_, _ = p.Eval(jsRemoveAnnotateOverlay)
+		}()
 	}
 	return p.Screenshot(false, nil)
 }
@@ -401,9 +622,17 @@ func (d *RodDriver) Evaluate(ctx context.Context, handle, script string) (any, e
 		return nil, err
 	}
 
-	res, err := p.Eval(script)
+	trimmed := strings.TrimSpace(script)
+	if !strings.HasPrefix(trimmed, "function") && !strings.HasPrefix(trimmed, "()") && !strings.Contains(trimmed, "=>") {
+		trimmed = fmt.Sprintf("() => (%s)", trimmed)
+	}
+
+	res, err := p.Eval(trimmed)
 	if err != nil {
 		return nil, err
+	}
+	if res.Value.Val() != nil {
+		return res.Value.Val(), nil
 	}
 	return res.Value, nil
 }

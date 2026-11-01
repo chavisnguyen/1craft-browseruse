@@ -21,6 +21,8 @@
 * **No macOS Full Disk Access Needed:** Unlike legacy Chrome CDP setups blocked by macOS TCC permissions when reading `DevToolsActivePort`, the 1craft MV3 Chrome Extension bridge connects over authenticated local WebSockets.
 * **Multi-Profile Isolation (`work`, `personal`...):** Connect multiple Chrome profiles simultaneously. Agents can route tasks to designated profiles (e.g., `browser_new_tab(url, profile="work")`). Profile labels can be customized or auto-derived from your logged-in Google Accounts.
 * **Dedicated Background Window:** Agent tabs run inside an isolated, standardized 1280×900 dedicated window. The AI browses, clicks, and types without interfering with your active personal windows or hijacking your cursor.
+* **Virtual Cursor & Click Ripple:** Injects a sleek visual pointer that glides smoothly across elements and emits an animated ripple pulse on clicks and hovers for real-time visual feedback during live testing or video recording.
+* **Set-of-Marks (SoM) Visual Annotations:** Built-in numbered badges (`[1]`, `[2]`, `[3]`) and bounding boxes overlay on screenshots for multimodal vision models (Claude 3.7 Sonnet, Gemini 2.5).
 * **Zero-Dependency Installation:** Install in seconds via Homebrew (`brew install browseruse`) or compile from source with `make setup`.
 * **Zero API Key Overhead:** Directly leverages your AI agent's native vision and reasoning capabilities via DOM snapshots and element selector maps.
 
@@ -153,7 +155,7 @@ Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacke
 
 ## 🌐 Available MCP Tools
 
-AI agents connected to 1craft BrowserUse have access to the following 14 tools:
+AI agents connected to 1craft BrowserUse have access to **21 production-grade tools**:
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
@@ -163,11 +165,18 @@ AI agents connected to 1craft BrowserUse have access to the following 14 tools:
 | `browser_close_tab` | `tab_id` *(string)* | Closes a specific tab when the agent finishes its task. |
 | `browser_navigate` | `url` *(string)*<br>`tab_id` *(optional string)* | Navigates the specified (or active) tab to a new URL. |
 | `browser_snapshot` | `tab_id` *(optional string)* | Extracts an interactive accessibility DOM tree with clickable elements, inputs, buttons, and selector IDs. |
-| `browser_click` | `selector` *(string)*<br>`tab_id` *(optional string)* | Clicks an element identified by CSS selector, text match, or snapshot element index. |
+| `browser_click` | `selector` *(string)*<br>`tab_id` *(optional string)* | Clicks an element. Renders the virtual cursor and click ripple animation. |
+| `browser_hover` | `selector` *(string)*<br>`tab_id` *(optional string)* | Hovers over an element to reveal tooltips and dropdown menus. Renders the virtual cursor glide. |
 | `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into an input field or textarea, optionally submitting with `Enter`. |
 | `browser_press_key` | `key` *(string)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
-| `browser_scroll` | `direction` *(optional string)*<br>`amount` *(optional int)*<br>`tab_id` *(optional string)* | Scrolls the page (`down`, `up`, `top`, `bottom`) by specified pixels. Essential for reading long articles and infinite feeds. |
-| `browser_screenshot` | `filename` *(optional string)*<br>`tab_id` *(optional string)* | Captures a PNG screenshot of the tab view and returns the local file path. |
+| `browser_select` | `selector` *(string)*<br>`value` *(string)*<br>`tab_id` *(optional string)* | Selects an option in a `<select>` dropdown by value or text and dispatches change events. |
+| `browser_wait_for` | `selector` *(string)*<br>`timeout_ms` *(optional int)*<br>`state` *(optional string)*<br>`tab_id` *(optional string)* | Waits for an element to become `visible`, `hidden`, or `attached`. |
+| `browser_upload_file` | `selector` *(string)*<br>`files` *(string)*<br>`tab_id` *(optional string)* | Uploads local files to an `<input type='file'>` form element. |
+| `browser_drag_and_drop` | `from` *(string)*<br>`to` *(string)*<br>`tab_id` *(optional string)* | Drags an element and drops it onto a target element with smooth virtual cursor animation. |
+| `browser_scroll` | `direction` *(optional string)*<br>`amount` *(optional int)*<br>`tab_id` *(optional string)* | Scrolls the page (`down`, `up`, `top`, `bottom`) by specified pixels. |
+| `browser_activate_tab` | `tab_id` *(string)* | Brings a tab and its browser window into the visual foreground on screen. |
+| `browser_console_logs` | `clear` *(optional bool)*<br>`tab_id` *(optional string)* | Retrieves captured JavaScript console logs, errors, and warnings for web debugging. |
+| `browser_screenshot` | `filename` *(optional string)*<br>`annotate` *(optional bool)*<br>`tab_id` *(optional string)* | Captures a PNG screenshot. Set `annotate: true` to overlay Set-of-Mark numbered badges on interactive elements. |
 | `browser_evaluate` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
 | `get_browser_status`| *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |
 | `browser_close` | *none* | Closes all managed tabs and releases associated browser resources. |

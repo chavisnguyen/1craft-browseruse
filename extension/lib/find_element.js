@@ -173,6 +173,43 @@ export function findElementInPage(target, action, extraArg) {
           return;
         }
 
+        if (action === 'hover_fallback') {
+          el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, clientX: center.x, clientY: center.y }));
+          el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, clientX: center.x, clientY: center.y }));
+          el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: center.x, clientY: center.y }));
+          resolve({ found: true, center });
+          return;
+        }
+
+        if (action === 'select') {
+          let selectEl = el;
+          if (el.tagName !== 'SELECT') {
+            selectEl = el.querySelector('select') || el.closest('select');
+          }
+          if (!selectEl || selectEl.tagName !== 'SELECT') {
+            resolve({ found: false, error: `element matching '${target}' is not a <select> element` });
+            return;
+          }
+          let matchedOption = null;
+          const val = (extraArg || '').toLowerCase().trim();
+          for (const opt of selectEl.options) {
+            if (opt.value.toLowerCase() === val || opt.text.toLowerCase().includes(val)) {
+              matchedOption = opt;
+              break;
+            }
+          }
+          if (!matchedOption) {
+            resolve({ found: false, error: `no option found matching '${extraArg}' in <select>` });
+            return;
+          }
+          selectEl.value = matchedOption.value;
+          matchedOption.selected = true;
+          selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+          resolve({ found: true, center, selectedValue: matchedOption.value, selectedText: matchedOption.text });
+          return;
+        }
+
         if (action === 'prepare_type') {
           el.focus();
           if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
@@ -220,3 +257,61 @@ export function findElementInPage(target, action, extraArg) {
     poll();
   });
 }
+
+export function waitForElementInPage(target, timeoutMs, state) {
+  target = (target || '').trim();
+  timeoutMs = timeoutMs > 0 ? timeoutMs : 5000;
+  state = (state || 'visible').toLowerCase();
+
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    function check() {
+      let el = null;
+      try {
+        if (target.startsWith('/') || target.startsWith('(')) {
+          const xp = document.evaluate(target, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          el = xp.singleNodeValue;
+        } else {
+          el = document.querySelector(target);
+        }
+      } catch {
+        // ignore selector error
+      }
+
+      const isAttached = el instanceof Element;
+      let isVis = false;
+      if (isAttached) {
+        const rect = el.getBoundingClientRect();
+        const style = window.getComputedStyle(el);
+        isVis = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      }
+
+      if (state === 'attached' && isAttached) {
+        resolve({ satisfied: true, state: 'attached' });
+        return;
+      }
+      if (state === 'visible' && isVis) {
+        resolve({ satisfied: true, state: 'visible' });
+        return;
+      }
+      if (state === 'hidden' && !isVis) {
+        resolve({ satisfied: true, state: 'hidden' });
+        return;
+      }
+
+      if (Date.now() - startTime >= timeoutMs) {
+        resolve({
+          satisfied: false,
+          error: `timed out waiting ${timeoutMs}ms for '${target}' to be ${state}`,
+        });
+        return;
+      }
+
+      setTimeout(check, 100);
+    }
+
+    check();
+  });
+}
+

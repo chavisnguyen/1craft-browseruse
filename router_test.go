@@ -290,6 +290,103 @@ func TestRouter_Scroll(t *testing.T) {
 	}
 }
 
+func TestRouter_NewFeatures(t *testing.T) {
+	ctx := context.Background()
+	rod := NewRodDriver()
+	router := NewRouter(rod, nil)
+	defer router.CloseAll(ctx)
+
+	htmlPage := `data:text/html,
+	<!DOCTYPE html>
+	<html>
+	<body>
+		<h1 id="title">Test Page</h1>
+		<button id="btn" onmouseover="this.innerText='Hovered!'">Click Me</button>
+		<select id="fruit-select">
+			<option value="apple">Apple</option>
+			<option value="banana">Banana</option>
+			<option value="orange">Orange</option>
+		</select>
+		<div id="dynamic-box" style="display:none;">Appeared!</div>
+		<script>
+			setTimeout(() => {
+				document.getElementById('dynamic-box').style.display = 'block';
+			}, 300);
+			console.warn('Test warning log');
+			console.error('Test error log');
+		</script>
+	</body>
+	</html>`
+
+	tabID, _, err := router.NewTab(ctx, htmlPage, "")
+	if err != nil {
+		t.Fatalf("failed to create tab: %v", err)
+	}
+
+	// 1. Test Hover
+	t.Run("Hover", func(t *testing.T) {
+		_, summary, err := router.Hover(ctx, tabID, "#btn")
+		if err != nil {
+			t.Fatalf("failed to hover: %v", err)
+		}
+		if summary.URL == "" {
+			t.Errorf("expected non-empty summary URL")
+		}
+	})
+
+	// 2. Test Select
+	t.Run("Select", func(t *testing.T) {
+		_, _, err := router.Select(ctx, tabID, "#fruit-select", "banana")
+		if err != nil {
+			t.Fatalf("failed to select option: %v", err)
+		}
+		// Verify via Evaluate
+		_, val, err := router.Evaluate(ctx, tabID, "document.getElementById('fruit-select').value")
+		if err != nil {
+			t.Fatalf("failed to evaluate select value: %v", err)
+		}
+		if val != "banana" {
+			t.Errorf("expected select value 'banana', got '%v'", val)
+		}
+	})
+
+	// 3. Test WaitFor
+	t.Run("WaitFor", func(t *testing.T) {
+		_, err := router.WaitFor(ctx, tabID, "#dynamic-box", 3000, "visible")
+		if err != nil {
+			t.Fatalf("failed to wait for element: %v", err)
+		}
+	})
+
+	// 4. Test ActivateTab
+	t.Run("ActivateTab", func(t *testing.T) {
+		_, err := router.ActivateTab(ctx, tabID)
+		if err != nil {
+			t.Fatalf("failed to activate tab: %v", err)
+		}
+	})
+
+	// 5. Test Screenshot with Annotate
+	t.Run("ScreenshotAnnotate", func(t *testing.T) {
+		_, path, err := router.Screenshot(ctx, tabID, "/tmp/test_annotated.png", true)
+		if err != nil {
+			t.Fatalf("failed to take annotated screenshot: %v", err)
+		}
+		if path != "/tmp/test_annotated.png" {
+			t.Errorf("expected path /tmp/test_annotated.png, got %s", path)
+		}
+	})
+
+	// 6. Test ConsoleLogs
+	t.Run("ConsoleLogs", func(t *testing.T) {
+		_, logs, err := router.ConsoleLogs(ctx, tabID, true)
+		if err != nil {
+			t.Fatalf("failed to get console logs: %v", err)
+		}
+		_ = logs // Rod runs in sandbox mode, verify call completes without error
+	})
+}
+
 type ResultOrErr struct {
 	result json.RawMessage
 	err    error

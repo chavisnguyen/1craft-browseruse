@@ -323,7 +323,155 @@ func (d *ExtDriver) Scroll(ctx context.Context, handle, direction string, amount
 	return nil
 }
 
-func (d *ExtDriver) Screenshot(ctx context.Context, handle string) ([]byte, error) {
+func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Call(ctx, "page.hover", map[string]any{
+		"tabId":    tabID,
+		"selector": selector,
+	})
+	return err
+}
+
+func (d *ExtDriver) Select(ctx context.Context, handle, selector, value string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Call(ctx, "page.select", map[string]any{
+		"tabId":    tabID,
+		"selector": selector,
+		"value":    value,
+	})
+	return err
+}
+
+func (d *ExtDriver) WaitFor(ctx context.Context, handle, selector string, timeoutMs int, state string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	if timeoutMs <= 0 {
+		timeoutMs = 5000
+	}
+	if state == "" {
+		state = "visible"
+	}
+
+	_, err = s.Call(ctx, "page.waitFor", map[string]any{
+		"tabId":     tabID,
+		"selector":  selector,
+		"timeoutMs": timeoutMs,
+		"state":     state,
+	})
+	return err
+}
+
+func (d *ExtDriver) UploadFile(ctx context.Context, handle, selector string, files []string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Call(ctx, "page.uploadFile", map[string]any{
+		"tabId":    tabID,
+		"selector": selector,
+		"files":    files,
+	})
+	return err
+}
+
+func (d *ExtDriver) DragAndDrop(ctx context.Context, handle, fromSelector, toSelector string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Call(ctx, "page.dragAndDrop", map[string]any{
+		"tabId": tabID,
+		"from":  fromSelector,
+		"to":    toSelector,
+	})
+	return err
+}
+
+func (d *ExtDriver) ActivateTab(ctx context.Context, handle string) error {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return err
+	}
+
+	_, err = s.Call(ctx, "page.activateTab", map[string]any{
+		"tabId": tabID,
+	})
+	return err
+}
+
+func (d *ExtDriver) ConsoleLogs(ctx context.Context, handle string, clear bool) ([]string, error) {
+	tabID, err := parseTabHandle(handle)
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := d.session()
+	if err != nil {
+		return nil, err
+	}
+
+	raw, err := s.Call(ctx, "page.consoleLogs", map[string]any{
+		"tabId": tabID,
+		"clear": clear,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("invalid page.consoleLogs response: %w", err)
+	}
+
+	return res.Logs, nil
+}
+
+func (d *ExtDriver) Screenshot(ctx context.Context, handle string, annotate bool) ([]byte, error) {
 	tabID, err := parseTabHandle(handle)
 	if err != nil {
 		return nil, err
@@ -335,7 +483,8 @@ func (d *ExtDriver) Screenshot(ctx context.Context, handle string) ([]byte, erro
 	}
 
 	raw, err := s.Call(ctx, "page.screenshot", map[string]any{
-		"tabId": tabID,
+		"tabId":    tabID,
+		"annotate": annotate,
 	})
 	if err != nil {
 		return nil, err
