@@ -38,13 +38,16 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
       position: fixed !important;
       top: 0 !important;
       left: 0 !important;
+      margin-left: -4px !important;
+      margin-top: -2px !important;
       z-index: 2147483647 !important;
       pointer-events: none !important;
+      user-select: none !important;
       will-change: transform !important;
       transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
     `;
     cursor.innerHTML = `
-      <svg width="30" height="30" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 8px rgba(255, 42, 42, 0.9)) drop-shadow(0 3px 6px rgba(0,0,0,0.6));">
+      <svg width="28" height="28" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 6px rgba(255, 42, 42, 0.85)) drop-shadow(0 2px 5px rgba(0,0,0,0.5)); transform-origin: 5px 3px; transition: transform 0.12s ease-out;">
         <path d="M5 3L14 26L18 17L27 13L5 3Z" fill="#ff2a2a" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
         <circle cx="6" cy="4" r="3" fill="#ffffff" />
       </svg>
@@ -57,6 +60,13 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
 
     // Force reflow
     void cursor.offsetWidth;
+
+    window.addEventListener('mousemove', (e) => {
+      if (!cursor) return;
+      cursor.style.setProperty('transform', `translate3d(${e.clientX}px, ${e.clientY}px, 0)`, 'important');
+      window.__browseruse_last_x = e.clientX;
+      window.__browseruse_last_y = e.clientY;
+    }, { capture: true, passive: true });
   }
 
   // Animate smooth glide to target
@@ -66,11 +76,19 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
 
   if (isClick) {
     setTimeout(() => {
+      const svg = cursor.querySelector('svg');
+      if (svg) svg.style.transform = 'scale(0.82)';
+
       const ripple = document.createElement('div');
       ripple.className = 'browseruse-ripple-effect';
       ripple.style.left = `${targetX}px`;
       ripple.style.top = `${targetY}px`;
       document.documentElement.appendChild(ripple);
+
+      setTimeout(() => {
+        if (svg) svg.style.transform = 'scale(1)';
+      }, 160);
+
       setTimeout(() => {
         if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
       }, 650);

@@ -240,7 +240,14 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 
 	// Always inject prominent virtual cursor with click ripple directly into the page!
 	jsCursor := fmt.Sprintf(`() => {
-		let el = document.querySelector(%q);
+		let el = null;
+		try { el = document.querySelector(%q); } catch (e) {}
+		if (!el) {
+			try {
+				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+				if (xp && xp.singleNodeValue) el = xp.singleNodeValue;
+			} catch (e) {}
+		}
 		if (!el) {
 			const clean = %q.toLowerCase().trim();
 			const buttons = document.querySelectorAll('button, a, [role="button"], [role="link"], input[type="submit"]');
@@ -254,7 +261,7 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 		const cx = rect.left + rect.width / 2;
 		const cy = rect.top + rect.height / 2;
 		(%s)(cx, cy, true);
-	}`, selector, selector, jsShowVirtualCursor)
+	}`, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
 	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide and ripple animation!
 
@@ -278,14 +285,21 @@ func (d *ExtDriver) Type(ctx context.Context, handle, selector, text string) err
 
 	// Animate virtual cursor to input box before typing
 	jsCursor := fmt.Sprintf(`() => {
-		let el = document.querySelector(%q);
+		let el = null;
+		try { el = document.querySelector(%q); } catch (e) {}
+		if (!el) {
+			try {
+				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+				if (xp && xp.singleNodeValue) el = xp.singleNodeValue;
+			} catch (e) {}
+		}
 		if (!el) return;
 		el.scrollIntoView({block: 'center', inline: 'center'});
 		const rect = el.getBoundingClientRect();
 		const cx = rect.left + rect.width / 2;
 		const cy = rect.top + rect.height / 2;
 		(%s)(cx, cy, true);
-	}`, selector, jsShowVirtualCursor)
+	}`, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
 	time.Sleep(150 * time.Millisecond)
 
@@ -370,7 +384,14 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 
 	// Always animate prominent virtual cursor to element center
 	jsHover := fmt.Sprintf(`() => {
-		let el = document.querySelector(%q);
+		let el = null;
+		try { el = document.querySelector(%q); } catch (e) {}
+		if (!el) {
+			try {
+				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+				if (xp && xp.singleNodeValue) el = xp.singleNodeValue;
+			} catch (e) {}
+		}
 		if (!el) {
 			const clean = %q.toLowerCase().trim();
 			const buttons = document.querySelectorAll('button, a, [role="button"], [role="link"]');
@@ -387,7 +408,7 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, clientX: cx, clientY: cy}));
 		el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true, clientX: cx, clientY: cy}));
 		return true;
-	}`, selector, selector, jsShowVirtualCursor)
+	}`, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsHover)
 	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide!
 
