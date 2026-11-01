@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	Version          = "1.3.0"
+	Version          = "1.4.0"
 	defaultRodDriver = NewRodDriver()
 	defaultExtHub    = NewExtHub(30 * time.Second)
 	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)

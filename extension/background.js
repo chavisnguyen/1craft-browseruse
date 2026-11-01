@@ -1221,7 +1221,7 @@ async function connect() {
       profile: config.label,
       instanceId: config.instanceId,
       token: config.token,
-      version: '1.2.1',
+      version: (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '1.4.0',
       protocol: 1,
     };
     ws.send(JSON.stringify(hello));
