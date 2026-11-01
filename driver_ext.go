@@ -256,7 +256,7 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 		(%s)(cx, cy, true);
 	}`, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
-	time.Sleep(200 * time.Millisecond) // smooth visible pause so human eye sees the cursor glide & ripple
+	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide and ripple animation!
 
 	_, err = s.Call(ctx, "page.click", map[string]any{
 		"tabId":    tabID,
@@ -389,7 +389,7 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		return true;
 	}`, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsHover)
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide!
 
 	_, err = s.Call(ctx, "page.hover", map[string]any{
 		"tabId":    tabID,

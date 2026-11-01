@@ -86,7 +86,7 @@ const jsExtractElements = `() => {
     return items.join('\n');
 }`
 
-const jsShowVirtualCursor = `(x, y, isClick) => {
+const jsShowVirtualCursor = `(targetX, targetY, isClick) => {
     let styleEl = document.getElementById('browseruse-cursor-styles');
     if (!styleEl) {
         styleEl = document.createElement('style');
@@ -95,7 +95,7 @@ const jsShowVirtualCursor = `(x, y, isClick) => {
             @keyframes browseruse-click-ripple {
                 0% { transform: scale(0.2); opacity: 1; border-width: 4px; }
                 50% { opacity: 0.85; }
-                100% { transform: scale(2.8); opacity: 0; border-width: 1px; }
+                100% { transform: scale(3.0); opacity: 0; border-width: 1px; }
             }
             .browseruse-ripple-effect {
                 position: fixed !important;
@@ -124,32 +124,39 @@ const jsShowVirtualCursor = `(x, y, isClick) => {
             left: 0 !important;
             z-index: 2147483647 !important;
             pointer-events: none !important;
-            transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1) !important;
             will-change: transform !important;
-            display: flex !important;
-            align-items: center !important;
-            gap: 6px !important;
-            transform: translate3d(${x}px, ${y}px, 0) !important;
+            transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
         ` + "`" + `;
         cursor.innerHTML = ` + "`" + `
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 8px rgba(255, 42, 42, 0.9)) drop-shadow(0 3px 6px rgba(0,0,0,0.6));">
+            <svg width="30" height="30" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 8px rgba(255, 42, 42, 0.9)) drop-shadow(0 3px 6px rgba(0,0,0,0.6));">
                 <path d="M5 3L14 26L18 17L27 13L5 3Z" fill="#ff2a2a" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
                 <circle cx="6" cy="4" r="3" fill="#ffffff" />
             </svg>
-            <span style="background: linear-gradient(135deg, #ff2a2a, #ff6b6b); color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); border: 1.5px solid #ffffff; letter-spacing: 0.3px; white-space: nowrap;">🤖 AI Agent</span>
         ` + "`" + `;
+
+        const startX = window.__browseruse_last_x !== undefined ? window.__browseruse_last_x : Math.round(window.innerWidth / 2);
+        const startY = window.__browseruse_last_y !== undefined ? window.__browseruse_last_y : Math.round(window.innerHeight / 2);
+        cursor.style.setProperty('transform', 'translate3d(' + startX + 'px, ' + startY + 'px, 0)', 'important');
         document.documentElement.appendChild(cursor);
-    } else {
-        cursor.style.transform = ` + "`translate3d(${x}px, ${y}px, 0)`" + `;
+
+        // Force reflow so transition is guaranteed to animate
+        void cursor.offsetWidth;
     }
 
+    // Animate smooth glide to target
+    cursor.style.setProperty('transform', 'translate3d(' + targetX + 'px, ' + targetY + 'px, 0)', 'important');
+    window.__browseruse_last_x = targetX;
+    window.__browseruse_last_y = targetY;
+
     if (isClick) {
-        const ripple = document.createElement('div');
-        ripple.className = 'browseruse-ripple-effect';
-        ripple.style.left = ` + "`${x}px`" + `;
-        ripple.style.top = ` + "`${y}px`" + `;
-        document.documentElement.appendChild(ripple);
-        setTimeout(() => { if (ripple.parentNode) ripple.parentNode.removeChild(ripple); }, 650);
+        setTimeout(() => {
+            const ripple = document.createElement('div');
+            ripple.className = 'browseruse-ripple-effect';
+            ripple.style.left = targetX + 'px';
+            ripple.style.top = targetY + 'px';
+            document.documentElement.appendChild(ripple);
+            setTimeout(() => { if (ripple.parentNode) ripple.parentNode.removeChild(ripple); }, 650);
+        }, 400);
     }
 }`
 

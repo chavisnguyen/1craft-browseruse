@@ -309,7 +309,7 @@ func (d *RodDriver) Click(ctx context.Context, handle, selector string) error {
 		cx := shape.Box().X + shape.Box().Width/2
 		cy := shape.Box().Y + shape.Box().Height/2
 		_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, true)", jsShowVirtualCursor, cx, cy))
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
@@ -340,6 +340,7 @@ func (d *RodDriver) Hover(ctx context.Context, handle, selector string) error {
 		cy := shape.Box().Y + shape.Box().Height/2
 		_, _ = p.Eval(fmt.Sprintf("(%s)(%f, %f, false)", jsShowVirtualCursor, cx, cy))
 		_ = p.Mouse.MoveTo(proto.Point{X: cx, Y: cy})
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	_ = el.Hover()
