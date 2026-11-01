@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type ExtDriver struct {
@@ -338,7 +339,26 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		"tabId":    tabID,
 		"selector": selector,
 	})
-	return err
+	if err != nil {
+		// Defensive fallback via page.evaluate for older extension sessions
+		jsHover := fmt.Sprintf(`() => {
+			const el = document.querySelector(%q);
+			if (!el) return false;
+			el.scrollIntoView({block: 'center', inline: 'center'});
+			const rect = el.getBoundingClientRect();
+			const cx = rect.left + rect.width / 2;
+			const cy = rect.top + rect.height / 2;
+			(%s)(cx, cy, false);
+			el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, clientX: cx, clientY: cy}));
+			el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true, clientX: cx, clientY: cy}));
+			return true;
+		}`, selector, jsShowVirtualCursor)
+		if _, evalErr := d.Evaluate(ctx, handle, jsHover); evalErr == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (d *ExtDriver) Select(ctx context.Context, handle, selector, value string) error {
@@ -357,7 +377,31 @@ func (d *ExtDriver) Select(ctx context.Context, handle, selector, value string) 
 		"selector": selector,
 		"value":    value,
 	})
-	return err
+	if err != nil {
+		// Defensive fallback via page.evaluate
+		jsSelect := fmt.Sprintf(`() => {
+			let sel = document.querySelector(%q);
+			if (!sel) return false;
+			if (sel.tagName !== 'SELECT') sel = sel.querySelector('select') || sel.closest('select');
+			if (!sel || sel.tagName !== 'SELECT') return false;
+			const val = %q.toLowerCase().trim();
+			for (let opt of sel.options) {
+				if (opt.value.toLowerCase() === val || opt.text.toLowerCase().includes(val)) {
+					sel.value = opt.value;
+					opt.selected = true;
+					sel.dispatchEvent(new Event('input', {bubbles: true}));
+					sel.dispatchEvent(new Event('change', {bubbles: true}));
+					return true;
+				}
+			}
+			return false;
+		}`, selector, value)
+		if _, evalErr := d.Evaluate(ctx, handle, jsSelect); evalErr == nil {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func (d *ExtDriver) WaitFor(ctx context.Context, handle, selector string, timeoutMs int, state string) error {
@@ -384,7 +428,38 @@ func (d *ExtDriver) WaitFor(ctx context.Context, handle, selector string, timeou
 		"timeoutMs": timeoutMs,
 		"state":     state,
 	})
-	return err
+	if err != nil {
+		// Defensive fallback via page.evaluate polling
+		jsWait := fmt.Sprintf(`() => {
+			const el = document.querySelector(%q);
+			const state = %q;
+			const isAttached = el !== null;
+			let isVis = false;
+			if (isAttached) {
+				const rect = el.getBoundingClientRect();
+				const style = window.getComputedStyle(el);
+				isVis = rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+			}
+			if (state === 'attached') return isAttached;
+			if (state === 'hidden') return !isVis;
+			return isVis;
+		}`, selector, state)
+		start := time.Now()
+		for {
+			res, evalErr := d.Evaluate(ctx, handle, jsWait)
+			if evalErr == nil {
+				if b, ok := res.(bool); ok && b {
+					return nil
+				}
+			}
+			if time.Since(start) >= time.Duration(timeoutMs)*time.Millisecond {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return err
+	}
+	return nil
 }
 
 func (d *ExtDriver) UploadFile(ctx context.Context, handle, selector string, files []string) error {
@@ -458,7 +533,24 @@ func (d *ExtDriver) ConsoleLogs(ctx context.Context, handle string, clear bool) 
 		"clear": clear,
 	})
 	if err != nil {
-		return nil, err
+		// Defensive fallback via page.evaluate
+		jsLogs := fmt.Sprintf(`() => {
+			const logs = window.__browseruse_logs || [];
+			const res = [...logs];
+			if (%t) window.__browseruse_logs = [];
+			return res;
+		}`, clear)
+		res, evalErr := d.Evaluate(ctx, handle, jsLogs)
+		if evalErr == nil {
+			if arr, ok := res.([]any); ok {
+				var logs []string
+				for _, item := range arr {
+					logs = append(logs, fmt.Sprint(item))
+				}
+				return logs, nil
+			}
+		}
+		return []string{}, nil
 	}
 
 	var res struct {
@@ -480,6 +572,13 @@ func (d *ExtDriver) Screenshot(ctx context.Context, handle string, annotate bool
 	s, err := d.session()
 	if err != nil {
 		return nil, err
+	}
+
+	if annotate {
+		_, _ = d.Evaluate(ctx, handle, jsAnnotateElements)
+		defer func() {
+			_, _ = d.Evaluate(ctx, handle, jsRemoveAnnotateOverlay)
+		}()
 	}
 
 	raw, err := s.Call(ctx, "page.screenshot", map[string]any{
