@@ -650,14 +650,19 @@ async function handleRequest(msg) {
             target: { tabId },
             func: (kName, kCode) => {
               const target = document.activeElement || document.body;
-              target.dispatchEvent(new KeyboardEvent('keydown', { key: kName, code: kCode, bubbles: true }));
-              target.dispatchEvent(new KeyboardEvent('keyup', { key: kName, code: kCode, bubbles: true }));
+              target.dispatchEvent(new KeyboardEvent('keydown', { key: kName, code: kCode, keyCode: 13, which: 13, bubbles: true }));
+              target.dispatchEvent(new KeyboardEvent('keypress', { key: kName, code: kCode, keyCode: 13, which: 13, bubbles: true }));
+              target.dispatchEvent(new KeyboardEvent('keyup', { key: kName, code: kCode, keyCode: 13, which: 13, bubbles: true }));
+              if (kName === 'Enter' && target && target.form) {
+                if (target.form.requestSubmit) target.form.requestSubmit();
+                else target.form.submit();
+              }
             },
             args: [kd.key, kd.code],
           });
         }
 
-        await sleep(500); // 500ms settling time matching rod backend
+        await sleep(50); // minimal settling time
         return { type: 'res', id, result: {} };
       }
 
