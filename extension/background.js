@@ -325,19 +325,43 @@ async function handleRequest(msg) {
             : null;
 
         const tabs = [];
-        for (const tabId of Array.from(agentTabIds)) {
-          if (requested && !requested.has(tabId)) {
-            continue;
+        if (requested) {
+          // Direct check for specific tab IDs (e.g. CheckAlive) -> Query Chrome directly, never drop due to MV3 idle!
+          for (const tabId of requested) {
+            try {
+              const t = await chrome.tabs.get(tabId);
+              agentTabIds.add(tabId);
+              tabs.push({
+                tabId: t.id,
+                url: t.url || '',
+                title: t.title || '',
+              });
+            } catch {
+              agentTabIds.delete(tabId);
+            }
           }
-          try {
-            const t = await chrome.tabs.get(tabId);
-            tabs.push({
-              tabId: t.id,
-              url: t.url || '',
-              title: t.title || '',
-            });
-          } catch {
-            agentTabIds.delete(tabId);
+        } else {
+          // Query all tabs in agentTabIds or chrome
+          const candidateTabIds = new Set(agentTabIds);
+          if (candidateTabIds.size === 0) {
+            try {
+              const allTabs = await chrome.tabs.query({});
+              for (const t of allTabs) {
+                if (t.id) candidateTabIds.add(t.id);
+              }
+            } catch {}
+          }
+          for (const tabId of Array.from(candidateTabIds)) {
+            try {
+              const t = await chrome.tabs.get(tabId);
+              tabs.push({
+                tabId: t.id,
+                url: t.url || '',
+                title: t.title || '',
+              });
+            } catch {
+              agentTabIds.delete(tabId);
+            }
           }
         }
         return {
