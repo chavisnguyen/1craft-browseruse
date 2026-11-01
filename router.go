@@ -19,12 +19,13 @@ type tabRef struct {
 }
 
 type Router struct {
-	mu        sync.Mutex
-	tabs      map[string]tabRef
-	activeTab string
-	counter   int
-	rod       *RodDriver
-	hub       *ExtHub
+	mu          sync.Mutex
+	tabs        map[string]tabRef
+	activeTab   string
+	counter     int
+	rod         *RodDriver
+	hub         *ExtHub
+	lastCleanup time.Time
 }
 
 func NewRouter(rod *RodDriver, hub *ExtHub) *Router {
@@ -115,16 +116,20 @@ func (r *Router) cleanupDeadTabsLocked(ctx context.Context) {
 }
 
 // getTabRefLocked returns tabRef for tabID or active tab without locking.
-// It first prunes any closed/dead tabs. If no tab exists at all, it auto-creates the first tab.
+// If the targeted tab was closed externally, it prunes it and handles auto-recovery.
 func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, error) {
-	// Clean up any dead tabs first (e.g. closed by user or browser restart)
-	r.cleanupDeadTabsLocked(ctx)
-
 	// 1. Explicit tabID provided
 	if tabID != "" {
 		ref, ok := r.tabs[tabID]
 		if ok {
-			return ref, nil
+			if ref.driver.CheckAlive(ctx, ref.handle) {
+				return ref, nil
+			}
+			// Tab was closed externally
+			delete(r.tabs, tabID)
+			if r.activeTab == tabID {
+				r.activeTab = ""
+			}
 		}
 		return tabRef{}, fmt.Errorf("tab '%s' not found or was closed. Call 'browser_list_tabs' or 'browser_new_tab'", tabID)
 	}
@@ -132,15 +137,22 @@ func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, err
 	// 2. Active tab
 	if r.activeTab != "" {
 		if ref, ok := r.tabs[r.activeTab]; ok {
-			return ref, nil
+			if ref.driver.CheckAlive(ctx, ref.handle) {
+				return ref, nil
+			}
+			delete(r.tabs, r.activeTab)
+			r.activeTab = ""
 		}
 	}
 
-	// 3. Fallback to any existing tab
+	// 3. Fallback to any existing tab that is still alive
 	if len(r.tabs) > 0 {
 		for id, ref := range r.tabs {
-			r.activeTab = id
-			return ref, nil
+			if ref.driver.CheckAlive(ctx, ref.handle) {
+				r.activeTab = id
+				return ref, nil
+			}
+			delete(r.tabs, id)
 		}
 	}
 
@@ -425,7 +437,7 @@ func (r *Router) Type(ctx context.Context, tabID, selector, text string, pressEn
 
 	if pressEnter {
 		_ = ref.driver.PressKey(ctx, ref.handle, "enter")
-		time.Sleep(1 * time.Second)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	return ref.tabID, nil

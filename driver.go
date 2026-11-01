@@ -64,13 +64,18 @@ func formatPageSummary(tabID string, summary PageSummary) string {
 		tabID, summary.URL, summary.Title, summary.Elements)
 }
 
+func formatPageSummaryCompact(tabID string, summary PageSummary) string {
+	return fmt.Sprintf("**Tab ID**: `%s` | **Current URL**: `%s` | **Page Title**: %s",
+		tabID, summary.URL, summary.Title)
+}
+
 const jsExtractElements = `() => {
     const items = [];
     const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], h1, h2, h3');
-    elements.forEach((el, idx) => {
-        if (idx > 100) return;
+    for (const el of elements) {
+        if (items.length >= 40) break;
         const rect = el.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) return;
+        if (rect.width === 0 || rect.height === 0) continue;
         const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
         const tag = el.tagName.toLowerCase();
         const role = el.getAttribute('role') || tag;
@@ -82,7 +87,7 @@ const jsExtractElements = `() => {
             const metaStr = meta.length > 0 ? ' (' + meta.join(' ') + ')' : '';
             items.push('- [' + role + '] "' + text + '"' + metaStr);
         }
-    });
+    }
     return items.join('\n');
 }`
 

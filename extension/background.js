@@ -224,16 +224,7 @@ function isRestrictedUrl(url) {
 }
 
 // Helper to wait for a tab to finish loading
-async function waitForTabLoad(tabId, timeoutMs = 30000) {
-  try {
-    const current = await chrome.tabs.get(tabId);
-    if (current && current.status === 'complete') {
-      return current;
-    }
-  } catch {
-    // ignore
-  }
-
+function waitForTabLoad(tabId, timeoutMs = 15000) {
   return new Promise((resolve) => {
     let timer = null;
 
@@ -247,7 +238,7 @@ async function waitForTabLoad(tabId, timeoutMs = 30000) {
 
     timer = setTimeout(() => {
       chrome.tabs.onUpdated.removeListener(listener);
-      resolve(null); // resolve even on timeout so we don't reject abruptly
+      resolve(null);
     }, timeoutMs);
 
     chrome.tabs.onUpdated.addListener(listener);
@@ -392,9 +383,10 @@ async function handleRequest(msg) {
 
       case 'page.navigate': {
         const tabId = params.tabId;
+        const loadPromise = waitForTabLoad(tabId, 15000);
         await chrome.tabs.update(tabId, { url: params.url });
-        await waitForTabLoad(tabId, 30000);
-        await sleep(1000); // 1s settling time matching rod backend
+        await loadPromise;
+        await sleep(100); // 100ms settling time
         return { type: 'res', id, result: {} };
       }
 
@@ -479,7 +471,7 @@ async function handleRequest(msg) {
           };
         }
 
-        await sleep(200); // 200ms settling time after scrollIntoView
+        await sleep(30); // minimal settling time after scrollIntoView
 
         // Animate virtual cursor & show click ripple
         await chrome.scripting.executeScript({

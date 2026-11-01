@@ -111,16 +111,26 @@ func setupMCPServer() *server.MCPServer {
 	navTool := mcp.NewTool("browser_navigate",
 		mcp.WithDescription("Navigate to a URL. Operates on the specified tab_id or the active tab."),
 		mcp.WithString("url", mcp.Required(), mcp.Description("The web URL to navigate to")),
+		mcp.WithString("wait_for", mcp.Description("Optional selector to automatically wait for after navigation (e.g. 'input[name=search_query]')")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID to target (e.g. 'tab-1'). If omitted, uses active tab.")),
 	)
 	s.AddTool(navTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		url := req.GetString("url", "")
 		tabID := req.GetString("tab_id", "")
+		waitFor := req.GetString("wait_for", "")
 
 		actualTabID, mode, summary, err := defaultRouter.Navigate(ctx, tabID, url)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to navigate: %v", err)), nil
 		}
+
+		if waitFor != "" {
+			_, _ = defaultRouter.WaitFor(ctx, actualTabID, waitFor, 5000, "visible")
+			if _, updatedSummary, sErr := defaultRouter.Snapshot(ctx, actualTabID); sErr == nil {
+				summary = updatedSummary
+			}
+		}
+
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Navigated tab `%s` to `%s` using **%s**.\n\n%s", actualTabID, normalizeURL(url), mode, formatPageSummary(actualTabID, summary))), nil
 	})
 
@@ -152,7 +162,7 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to click element: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s\n*(Use 'browser_snapshot' if you need the full interactive elements tree)*", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
 	})
 
 	// 7. browser_type
@@ -161,18 +171,25 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, placeholder, or label")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("The text to type")),
 		mcp.WithBoolean("press_enter", mcp.Description("Whether to press Enter after typing (default false)")),
+		mcp.WithString("wait_for", mcp.Description("Optional selector to automatically wait for after pressing Enter (e.g. 'ytd-video-renderer')")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
 	)
 	s.AddTool(typeTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		selector := req.GetString("selector", "")
 		text := req.GetString("text", "")
 		pressEnter := req.GetBool("press_enter", false)
+		waitFor := req.GetString("wait_for", "")
 		tabID := req.GetString("tab_id", "")
 
 		actualTabID, err := defaultRouter.Type(ctx, tabID, selector, text, pressEnter)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to type text: %v", err)), nil
 		}
+
+		if pressEnter && waitFor != "" {
+			_, _ = defaultRouter.WaitFor(ctx, actualTabID, waitFor, 5000, "visible")
+		}
+
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Typed '%s' into `%s` on `%s`.", text, selector, actualTabID)), nil
 	})
 
@@ -230,7 +247,7 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to hover element: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Hovered over `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Hovered over `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
 	})
 
 	// 11. browser_select
@@ -249,7 +266,7 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to select option: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Selected `%s` on `%s` (%s).\n\n%s", value, selector, actualTabID, formatPageSummary(actualTabID, summary))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Selected `%s` on `%s` (%s).\n\n%s", value, selector, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
 	})
 
 	// 12. browser_wait_for
@@ -324,7 +341,7 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Drag and drop failed: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Dragged `%s` to `%s` on `%s`.\n\n%s", from, to, actualTabID, formatPageSummary(actualTabID, summary))), nil
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Dragged `%s` to `%s` on `%s`.\n\n%s", from, to, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
 	})
 
 	// 15. browser_activate_tab

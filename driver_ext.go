@@ -263,7 +263,7 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 		(%s)(cx, cy, true);
 	}`, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
-	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide and ripple animation!
+	time.Sleep(30 * time.Millisecond) // non-blocking minimal yield: CSS transition runs asynchronously on GPU
 
 	_, err = s.Call(ctx, "page.click", map[string]any{
 		"tabId":    tabID,
@@ -301,7 +301,7 @@ func (d *ExtDriver) Type(ctx context.Context, handle, selector, text string) err
 		(%s)(cx, cy, true);
 	}`, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
 	_, err = s.Call(ctx, "page.type", map[string]any{
 		"tabId":    tabID,
@@ -410,7 +410,7 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		return true;
 	}`, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsHover)
-	time.Sleep(500 * time.Millisecond) // 500ms smooth visible human-like glide!
+	time.Sleep(30 * time.Millisecond) // non-blocking minimal yield: CSS transition runs asynchronously on GPU
 
 	_, err = s.Call(ctx, "page.hover", map[string]any{
 		"tabId":    tabID,
