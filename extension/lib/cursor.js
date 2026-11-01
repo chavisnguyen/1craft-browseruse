@@ -9,21 +9,22 @@ export function showVirtualCursorFn(x, y, isClick) {
     styleEl.id = 'browseruse-cursor-styles';
     styleEl.textContent = `
       @keyframes browseruse-click-ripple {
-        0% { transform: scale(0.2); opacity: 1; }
-        100% { transform: scale(2.2); opacity: 0; }
+        0% { transform: scale(0.2); opacity: 1; border-width: 4px; }
+        50% { opacity: 0.85; }
+        100% { transform: scale(2.8); opacity: 0; border-width: 1px; }
       }
       .browseruse-ripple-effect {
-        position: fixed;
-        width: 34px;
-        height: 34px;
-        margin-left: -17px;
-        margin-top: -17px;
-        border-radius: 50%;
-        border: 2px solid #ff3b30;
-        background: rgba(255, 59, 48, 0.35);
-        pointer-events: none;
-        z-index: 2147483646;
-        animation: browseruse-click-ripple 0.45s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+        position: fixed !important;
+        width: 44px !important;
+        height: 44px !important;
+        margin-left: -22px !important;
+        margin-top: -22px !important;
+        border-radius: 50% !important;
+        border: 3.5px solid #ff2a2a !important;
+        background: radial-gradient(circle, rgba(255, 42, 42, 0.45) 0%, rgba(255, 42, 42, 0) 70%) !important;
+        pointer-events: none !important;
+        z-index: 2147483646 !important;
+        animation: browseruse-click-ripple 0.6s cubic-bezier(0.1, 0.8, 0.3, 1) forwards !important;
       }
     `;
     document.documentElement.appendChild(styleEl);
@@ -34,20 +35,24 @@ export function showVirtualCursorFn(x, y, isClick) {
     cursor = document.createElement('div');
     cursor.id = 'browseruse-virtual-cursor';
     cursor.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      z-index: 2147483647;
-      pointer-events: none;
-      transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-      will-change: transform;
-      transform: translate3d(${x}px, ${y}px, 0);
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      z-index: 2147483647 !important;
+      pointer-events: none !important;
+      transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1) !important;
+      will-change: transform !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      transform: translate3d(${x}px, ${y}px, 0) !important;
     `;
     cursor.innerHTML = `
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="filter: drop-shadow(0 2px 5px rgba(0,0,0,0.45)); transform: translate(-2px, -2px);">
-        <path d="M5.5 3.5L11.5 20.5L14.5 13.5L21.5 10.5L5.5 3.5Z" fill="#ff3b30" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
-        <circle cx="5.5" cy="3.5" r="2.5" fill="#ffffff" />
+      <svg width="32" height="32" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 8px rgba(255, 42, 42, 0.9)) drop-shadow(0 3px 6px rgba(0,0,0,0.6));">
+        <path d="M5 3L14 26L18 17L27 13L5 3Z" fill="#ff2a2a" stroke="#ffffff" stroke-width="2.5" stroke-linejoin="round"/>
+        <circle cx="6" cy="4" r="3" fill="#ffffff" />
       </svg>
+      <span style="background: linear-gradient(135deg, #ff2a2a, #ff6b6b); color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.4); border: 1.5px solid #ffffff; letter-spacing: 0.3px; white-space: nowrap;">🤖 AI Agent</span>
     `;
     document.documentElement.appendChild(cursor);
   } else {
@@ -62,7 +67,7 @@ export function showVirtualCursorFn(x, y, isClick) {
     document.documentElement.appendChild(ripple);
     setTimeout(() => {
       if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
-    }, 500);
+    }, 650);
   }
 }
 

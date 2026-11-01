@@ -238,6 +238,26 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 		return err
 	}
 
+	// Always inject prominent virtual cursor with click ripple directly into the page!
+	jsCursor := fmt.Sprintf(`() => {
+		let el = document.querySelector(%q);
+		if (!el) {
+			const clean = %q.toLowerCase().trim();
+			const buttons = document.querySelectorAll('button, a, [role="button"], [role="link"], input[type="submit"]');
+			for (const b of buttons) {
+				if ((b.innerText || b.textContent || '').toLowerCase().includes(clean)) { el = b; break; }
+			}
+		}
+		if (!el) return;
+		el.scrollIntoView({block: 'center', inline: 'center'});
+		const rect = el.getBoundingClientRect();
+		const cx = rect.left + rect.width / 2;
+		const cy = rect.top + rect.height / 2;
+		(%s)(cx, cy, true);
+	}`, selector, selector, jsShowVirtualCursor)
+	_, _ = d.Evaluate(ctx, handle, jsCursor)
+	time.Sleep(200 * time.Millisecond) // smooth visible pause so human eye sees the cursor glide & ripple
+
 	_, err = s.Call(ctx, "page.click", map[string]any{
 		"tabId":    tabID,
 		"selector": selector,
@@ -255,6 +275,19 @@ func (d *ExtDriver) Type(ctx context.Context, handle, selector, text string) err
 	if err != nil {
 		return err
 	}
+
+	// Animate virtual cursor to input box before typing
+	jsCursor := fmt.Sprintf(`() => {
+		let el = document.querySelector(%q);
+		if (!el) return;
+		el.scrollIntoView({block: 'center', inline: 'center'});
+		const rect = el.getBoundingClientRect();
+		const cx = rect.left + rect.width / 2;
+		const cy = rect.top + rect.height / 2;
+		(%s)(cx, cy, true);
+	}`, selector, jsShowVirtualCursor)
+	_, _ = d.Evaluate(ctx, handle, jsCursor)
+	time.Sleep(150 * time.Millisecond)
 
 	_, err = s.Call(ctx, "page.type", map[string]any{
 		"tabId":    tabID,
@@ -335,28 +368,35 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		return err
 	}
 
+	// Always animate prominent virtual cursor to element center
+	jsHover := fmt.Sprintf(`() => {
+		let el = document.querySelector(%q);
+		if (!el) {
+			const clean = %q.toLowerCase().trim();
+			const buttons = document.querySelectorAll('button, a, [role="button"], [role="link"]');
+			for (const b of buttons) {
+				if ((b.innerText || b.textContent || '').toLowerCase().includes(clean)) { el = b; break; }
+			}
+		}
+		if (!el) return false;
+		el.scrollIntoView({block: 'center', inline: 'center'});
+		const rect = el.getBoundingClientRect();
+		const cx = rect.left + rect.width / 2;
+		const cy = rect.top + rect.height / 2;
+		(%s)(cx, cy, false);
+		el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, clientX: cx, clientY: cy}));
+		el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true, clientX: cx, clientY: cy}));
+		return true;
+	}`, selector, selector, jsShowVirtualCursor)
+	_, _ = d.Evaluate(ctx, handle, jsHover)
+	time.Sleep(200 * time.Millisecond)
+
 	_, err = s.Call(ctx, "page.hover", map[string]any{
 		"tabId":    tabID,
 		"selector": selector,
 	})
 	if err != nil {
-		// Defensive fallback via page.evaluate for older extension sessions
-		jsHover := fmt.Sprintf(`() => {
-			const el = document.querySelector(%q);
-			if (!el) return false;
-			el.scrollIntoView({block: 'center', inline: 'center'});
-			const rect = el.getBoundingClientRect();
-			const cx = rect.left + rect.width / 2;
-			const cy = rect.top + rect.height / 2;
-			(%s)(cx, cy, false);
-			el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, clientX: cx, clientY: cy}));
-			el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true, clientX: cx, clientY: cy}));
-			return true;
-		}`, selector, jsShowVirtualCursor)
-		if _, evalErr := d.Evaluate(ctx, handle, jsHover); evalErr == nil {
-			return nil
-		}
-		return err
+		return nil // already handled by evaluate
 	}
 	return nil
 }
