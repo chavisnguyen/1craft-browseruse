@@ -381,6 +381,11 @@ async function handleRequest(msg) {
         return { type: 'res', id, result: {} };
       }
 
+      case 'ext.reload': {
+        setTimeout(() => { chrome.runtime.reload(); }, 50);
+        return { type: 'res', id, result: { reloaded: true } };
+      }
+
       case 'page.navigate': {
         const tabId = params.tabId;
         const loadPromise = waitForTabLoad(tabId, 15000);
