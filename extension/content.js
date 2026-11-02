@@ -39,11 +39,10 @@ function injectPersistentCursor() {
         z-index: 2147483647 !important;
         pointer-events: none !important;
         user-select: none !important;
-        will-change: transform !important;
-        transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
+        will-change: transform, opacity !important;
+        transition: opacity 0.3s ease, transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
         display: block !important;
-        opacity: 1 !important;
-        visibility: visible !important;
+        opacity: 0 !important;
       }
     `;
     (document.head || document.documentElement).appendChild(styleEl);
@@ -71,19 +70,8 @@ function injectPersistentCursor() {
   } catch (e) {}
 
   cursor.style.setProperty('transform', `translate3d(${startX}px, ${startY}px, 0)`, 'important');
+  cursor.style.setProperty('opacity', '0', 'important');
   (document.body || document.documentElement).appendChild(cursor);
-
-  // Mouse move tracking
-  window.addEventListener('mousemove', (e) => {
-    if (!cursor) return;
-    cursor.style.setProperty('transform', `translate3d(${e.clientX}px, ${e.clientY}px, 0)`, 'important');
-    window.__browseruse_last_x = e.clientX;
-    window.__browseruse_last_y = e.clientY;
-    try {
-      sessionStorage.setItem('__browseruse_cursor_x', e.clientX);
-      sessionStorage.setItem('__browseruse_cursor_y', e.clientY);
-    } catch (err) {}
-  }, { capture: true, passive: true });
 }
 
 if (document.readyState === 'loading') {

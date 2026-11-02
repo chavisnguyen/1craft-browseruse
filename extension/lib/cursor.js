@@ -43,8 +43,9 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
       z-index: 2147483647 !important;
       pointer-events: none !important;
       user-select: none !important;
-      will-change: transform !important;
-      transition: transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
+      will-change: transform, opacity !important;
+      transition: opacity 0.3s ease, transform 0.45s cubic-bezier(0.25, 1, 0.5, 1) !important;
+      opacity: 0 !important;
     `;
     cursor.innerHTML = `
       <svg width="28" height="28" viewBox="0 0 32 32" fill="none" style="filter: drop-shadow(0 0 6px rgba(255, 42, 42, 0.85)) drop-shadow(0 2px 5px rgba(0,0,0,0.5)); transform-origin: 5px 3px; transition: transform 0.12s ease-out;">
@@ -60,14 +61,13 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
 
     // Force reflow
     void cursor.offsetWidth;
-
-    window.addEventListener('mousemove', (e) => {
-      if (!cursor) return;
-      cursor.style.setProperty('transform', `translate3d(${e.clientX}px, ${e.clientY}px, 0)`, 'important');
-      window.__browseruse_last_x = e.clientX;
-      window.__browseruse_last_y = e.clientY;
-    }, { capture: true, passive: true });
   }
+
+  // Clear previous fade timer and make cursor visible for this action
+  if (window.__browseruse_fade_timer) {
+    clearTimeout(window.__browseruse_fade_timer);
+  }
+  cursor.style.setProperty('opacity', '1', 'important');
 
   // Animate smooth glide to target
   cursor.style.setProperty('transform', `translate3d(${targetX}px, ${targetY}px, 0)`, 'important');
@@ -94,6 +94,11 @@ export function showVirtualCursorFn(targetX, targetY, isClick) {
       }, 650);
     }, 400);
   }
+
+  // Auto fade out when agent action completes and becomes idle
+  window.__browseruse_fade_timer = setTimeout(() => {
+    if (cursor) cursor.style.setProperty('opacity', '0', 'important');
+  }, 1500);
 }
 
 export function annotateElementsFn() {
