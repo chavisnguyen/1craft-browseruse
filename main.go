@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	Version          = "1.4.0"
+	Version          = "1.5.0"
 	defaultRodDriver = NewRodDriver()
 	defaultExtHub    = NewExtHub(30 * time.Second)
 	defaultRouter    = NewRouter(defaultRodDriver, defaultExtHub)
@@ -107,11 +107,21 @@ func setupMCPServer() *server.MCPServer {
 		return mcp.NewToolResultText(fmt.Sprintf("✅ Closed tab `%s`.", closedID)), nil
 	})
 
+	inlineScreenshot := func(ctx context.Context, tabID string) string {
+		uniqueName := fmt.Sprintf("screenshot-%d.png", time.Now().UnixNano())
+		_, savedPath, err := defaultRouter.Screenshot(ctx, tabID, uniqueName, false)
+		if err != nil {
+			return ""
+		}
+		return fmt.Sprintf("\n\n📸 **Screenshot**: `%s`", savedPath)
+	}
+
 	// 4. browser_navigate
 	navTool := mcp.NewTool("browser_navigate",
 		mcp.WithDescription("Navigate to a URL. Operates on the specified tab_id or the active tab."),
 		mcp.WithString("url", mcp.Required(), mcp.Description("The web URL to navigate to")),
 		mcp.WithString("wait_for", mcp.Description("Optional selector to automatically wait for after navigation (e.g. 'input[name=search_query]')")),
+		mcp.WithBoolean("screenshot", mcp.Description("Optional: capture and return screenshot immediately after navigating")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID to target (e.g. 'tab-1'). If omitted, uses active tab.")),
 	)
 	s.AddTool(navTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -131,7 +141,12 @@ func setupMCPServer() *server.MCPServer {
 			}
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Navigated tab `%s` to `%s` using **%s**.\n\n%s", actualTabID, normalizeURL(url), mode, formatPageSummary(actualTabID, summary))), nil
+		shotMsg := ""
+		if req.GetBool("screenshot", false) {
+			shotMsg = inlineScreenshot(ctx, actualTabID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Navigated tab `%s` to `%s` using **%s**.\n\n%s%s", actualTabID, normalizeURL(url), mode, formatPageSummary(actualTabID, summary), shotMsg)), nil
 	})
 
 	// 5. browser_snapshot
@@ -150,8 +165,9 @@ func setupMCPServer() *server.MCPServer {
 
 	// 6. browser_click
 	clickTool := mcp.NewTool("browser_click",
-		mcp.WithDescription("Click an element on a tab by CSS selector, button text, or aria-label."),
-		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, button text, or link text")),
+		mcp.WithDescription("Click an element on a tab by element reference (e.g. '@e1'), CSS selector, button text, or aria-label."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("Element reference (e.g. '@e1'), CSS selector, button text, or link text")),
+		mcp.WithBoolean("screenshot", mcp.Description("Optional: capture and return screenshot immediately after clicking")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
 	)
 	s.AddTool(clickTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -162,16 +178,23 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to click element: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s\n*(Use 'browser_snapshot' if you need the full interactive elements tree)*", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
+
+		shotMsg := ""
+		if req.GetBool("screenshot", false) {
+			shotMsg = inlineScreenshot(ctx, actualTabID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Clicked `%s` on `%s`.\n\n%s%s\n*(Use 'browser_snapshot' if you need the full interactive elements tree)*", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary), shotMsg)), nil
 	})
 
 	// 7. browser_type
 	typeTool := mcp.NewTool("browser_type",
 		mcp.WithDescription("Type text into an input field or textarea."),
-		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, placeholder, or label")),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("Element reference (e.g. '@e1'), CSS selector, placeholder, or label")),
 		mcp.WithString("text", mcp.Required(), mcp.Description("The text to type")),
 		mcp.WithBoolean("press_enter", mcp.Description("Whether to press Enter after typing (default false)")),
 		mcp.WithString("wait_for", mcp.Description("Optional selector to automatically wait for after pressing Enter (e.g. 'ytd-video-renderer')")),
+		mcp.WithBoolean("screenshot", mcp.Description("Optional: capture and return screenshot immediately after typing")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
 	)
 	s.AddTool(typeTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -190,13 +213,19 @@ func setupMCPServer() *server.MCPServer {
 			_, _ = defaultRouter.WaitFor(ctx, actualTabID, waitFor, 5000, "visible")
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Typed '%s' into `%s` on `%s`.", text, selector, actualTabID)), nil
+		shotMsg := ""
+		if req.GetBool("screenshot", false) {
+			shotMsg = inlineScreenshot(ctx, actualTabID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Typed '%s' into `%s` on `%s`.%s", text, selector, actualTabID, shotMsg)), nil
 	})
 
 	// 8. browser_press_key
 	keyTool := mcp.NewTool("browser_press_key",
 		mcp.WithDescription("Press a keyboard key on the active tab."),
 		mcp.WithString("key", mcp.Required(), mcp.Description("Key name (Enter, Tab, Escape, Down, Up)")),
+		mcp.WithBoolean("screenshot", mcp.Description("Optional: capture and return screenshot immediately after pressing key")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID")),
 	)
 	s.AddTool(keyTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -207,7 +236,13 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to press key: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Pressed key `%s` on `%s`.", keyName, actualTabID)), nil
+
+		shotMsg := ""
+		if req.GetBool("screenshot", false) {
+			shotMsg = inlineScreenshot(ctx, actualTabID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Pressed key `%s` on `%s`.%s", keyName, actualTabID, shotMsg)), nil
 	})
 
 	// 9. browser_screenshot
@@ -235,8 +270,9 @@ func setupMCPServer() *server.MCPServer {
 
 	// 10. browser_hover
 	hoverTool := mcp.NewTool("browser_hover",
-		mcp.WithDescription("Hover the mouse over an element by CSS selector, button text, or aria-label. Displays the virtual cursor and triggers dropdown menus/tooltips."),
-		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, button text, or link text to hover over")),
+		mcp.WithDescription("Hover the mouse over an element by element reference (e.g. '@e1'), CSS selector, or text. Displays the virtual cursor and triggers dropdown menus/tooltips."),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("Element reference (e.g. '@e1'), CSS selector, or visible text to hover over")),
+		mcp.WithBoolean("screenshot", mcp.Description("Optional: capture and return screenshot immediately after hovering")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
 	)
 	s.AddTool(hoverTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -247,13 +283,19 @@ func setupMCPServer() *server.MCPServer {
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to hover element: %v", err)), nil
 		}
-		return mcp.NewToolResultText(fmt.Sprintf("✅ Hovered over `%s` on `%s`.\n\n%s", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary))), nil
+
+		shotMsg := ""
+		if req.GetBool("screenshot", false) {
+			shotMsg = inlineScreenshot(ctx, actualTabID)
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("✅ Hovered over `%s` on `%s`.\n\n%s%s", selector, actualTabID, formatPageSummaryCompact(actualTabID, summary), shotMsg)), nil
 	})
 
 	// 11. browser_select
 	selectTool := mcp.NewTool("browser_select",
 		mcp.WithDescription("Select an option in a dropdown (<select>) element by option value or text."),
-		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector for the <select> element")),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("Element reference (e.g. '@e1') or CSS selector for the <select> element")),
 		mcp.WithString("value", mcp.Required(), mcp.Description("Option value or visible text to select")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),
 	)
@@ -272,7 +314,7 @@ func setupMCPServer() *server.MCPServer {
 	// 12. browser_wait_for
 	waitForTool := mcp.NewTool("browser_wait_for",
 		mcp.WithDescription("Wait for an element to appear, become visible, or disappear. Essential for Single Page Apps and dynamic content."),
-		mcp.WithString("selector", mcp.Required(), mcp.Description("CSS selector, button text, or link text")),
+		mcp.WithString("selector", mcp.Required(), mcp.Description("Element reference (e.g. '@e1'), CSS selector, button text, or link text")),
 		mcp.WithNumber("timeout_ms", mcp.Description("Timeout in milliseconds (default 5000, max 30000)")),
 		mcp.WithString("state", mcp.Description("State to wait for: 'visible' (default), 'hidden', or 'attached'")),
 		mcp.WithString("tab_id", mcp.Description("Optional tab ID. If omitted, uses active tab.")),

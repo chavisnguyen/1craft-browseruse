@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,8 @@ import (
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 )
+
+var refRegex = regexp.MustCompile(`(?i)^@?e(\d+)$`)
 
 const defaultCDPURL = "http://127.0.0.1:9222"
 
@@ -313,7 +316,14 @@ func (d *RodDriver) Click(ctx context.Context, handle, selector string) error {
 	}
 
 	if err := el.Click(proto.InputMouseButtonLeft, 1); err != nil {
-		return fmt.Errorf("failed to click element: %w", err)
+		// Hybrid click fallback: trigger direct DOM click on element or closest clickable ancestor
+		_, evalErr := el.Eval(`() => {
+			const target = this.closest('a, button, [role=button], input[type=submit], select') || this;
+			target.click();
+		}`)
+		if evalErr != nil {
+			return fmt.Errorf("failed to click element: %w (fallback error: %v)", err, evalErr)
+		}
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -658,6 +668,15 @@ func (d *RodDriver) Close() error {
 func findElement(page *rod.Page, target string) (*rod.Element, error) {
 	target = strings.TrimSpace(target)
 	clean := strings.Trim(target, `"'`)
+
+	// 0. Element reference (@e1, e1)
+	if refMatch := refRegex.FindStringSubmatch(clean); len(refMatch) == 2 {
+		refQuery := fmt.Sprintf(`[data-browseruse-ref="e%s"]`, refMatch[1])
+		el, err := page.Timeout(1 * time.Second).Element(refQuery)
+		if err == nil && el != nil {
+			return el, nil
+		}
+	}
 
 	// Handle Playwright-style :has-text("...")
 	if strings.Contains(target, ":has-text(") {

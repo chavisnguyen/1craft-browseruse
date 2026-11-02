@@ -32,6 +32,19 @@ export function findElementInPage(target, action, extraArg) {
   }
 
   function findOnce() {
+    // 0. Element reference (@e1, e1)
+    const refMatch = clean.match(/^@?e(\d+)$/i);
+    if (refMatch) {
+      try {
+        const refEl = document.querySelector(`[data-browseruse-ref="e${refMatch[1]}"]`);
+        if (refEl && isVisible(refEl)) {
+          return refEl;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 1. XPath if starts with / or (
     if (target.startsWith('/') || target.startsWith('(')) {
       try {
@@ -166,6 +179,30 @@ export function findElementInPage(target, action, extraArg) {
           width: rect.width,
           height: rect.height,
         };
+
+        if (action === 'prepare_click') {
+          const clickable = el.closest('a, button, [role=button], input[type=submit], select') || el;
+          clickable.__bu_clicked = false;
+          const handler = () => { clickable.__bu_clicked = true; };
+          clickable.addEventListener('click', handler, { capture: true, once: true });
+          clickable.__bu_handler = handler;
+          resolve({ found: true, center });
+          return;
+        }
+
+        if (action === 'ensure_click') {
+          const clickable = el.closest('a, button, [role=button], input[type=submit], select') || el;
+          if (clickable.__bu_handler) {
+            clickable.removeEventListener('click', clickable.__bu_handler, { capture: true });
+            delete clickable.__bu_handler;
+          }
+          if (!clickable.__bu_clicked) {
+            clickable.click();
+          }
+          delete clickable.__bu_clicked;
+          resolve({ found: true, center });
+          return;
+        }
 
         if (action === 'click_fallback') {
           el.click();

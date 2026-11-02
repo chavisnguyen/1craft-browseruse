@@ -452,11 +452,11 @@ async function handleRequest(msg) {
           };
         }
 
-        // Find element in page
+        // Find element in page & register click listener for hybrid verification
         const results = await chrome.scripting.executeScript({
           target: { tabId },
           func: findElementInPage,
-          args: [selector, 'find', ''],
+          args: [selector, 'prepare_click', ''],
         });
 
         const findRes = results && results[0] ? results[0].result : null;
@@ -482,7 +482,6 @@ async function handleRequest(msg) {
 
         // Try clicking via debugger
         const hasDebugger = await ensureDebuggerAttached(tabId);
-        let clicked = false;
         if (hasDebugger) {
           try {
             const { x, y } = findRes.center;
@@ -505,22 +504,21 @@ async function handleRequest(msg) {
               button: 'left',
               clickCount: 1,
             });
-            clicked = true;
           } catch (e) {
-            console.warn('Debugger click failed, trying fallback:', e);
+            console.warn('Debugger click failed:', e);
           }
         }
 
-        if (!clicked) {
-          // Fallback to direct DOM el.click()
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            func: findElementInPage,
-            args: [selector, 'click_fallback', ''],
-          });
-        }
+        // Hybrid Universal Click Guarantee:
+        // Ensure DOM click was received. If not (CDP hit overlay/shadow container, or debugger detached),
+        // trigger direct DOM .click() on the closest clickable ancestor or element itself!
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: findElementInPage,
+          args: [selector, 'ensure_click', ''],
+        }).catch(() => {});
 
-        await sleep(1000); // 1s settling time matching rod backend
+        await sleep(200); // settling time for navigation or dynamic updates
         return { type: 'res', id, result: {} };
       }
 
@@ -1218,7 +1216,7 @@ async function connect() {
       profile: config.label,
       instanceId: config.instanceId,
       token: config.token,
-      version: (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '1.4.0',
+      version: (chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : '1.5.0',
       protocol: 1,
     };
     ws.send(JSON.stringify(hello));

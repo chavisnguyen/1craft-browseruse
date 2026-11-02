@@ -193,6 +193,14 @@ func (d *ExtDriver) Navigate(ctx context.Context, handle, url string) error {
 	return err
 }
 
+func resolveRefSelector(selector string) string {
+	clean := strings.TrimSpace(selector)
+	if match := refRegex.FindStringSubmatch(clean); len(match) == 2 {
+		return fmt.Sprintf(`[data-browseruse-ref="e%s"]`, match[1])
+	}
+	return selector
+}
+
 func (d *ExtDriver) Snapshot(ctx context.Context, handle string) (PageSummary, error) {
 	tabID, err := parseTabHandle(handle)
 	if err != nil {
@@ -220,6 +228,13 @@ func (d *ExtDriver) Snapshot(ctx context.Context, handle string) (PageSummary, e
 		return PageSummary{}, fmt.Errorf("invalid page.snapshot response: %w", err)
 	}
 
+	// Always ensure element references (@e1, @e2) are extracted using the unified jsExtractElements
+	if elemVal, err := d.Evaluate(ctx, handle, jsExtractElements); err == nil && elemVal != nil {
+		if elemStr, ok := elemVal.(string); ok && elemStr != "" {
+			res.Elements = elemStr
+		}
+	}
+
 	return PageSummary{
 		URL:      res.URL,
 		Title:    res.Title,
@@ -241,7 +256,13 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 	// Always inject prominent virtual cursor with click ripple directly into the page!
 	jsCursor := fmt.Sprintf(`() => {
 		let el = null;
-		try { el = document.querySelector(%q); } catch (e) {}
+		const refMatch = %q.match(/^@?e(\d+)$/i);
+		if (refMatch) {
+			try { el = document.querySelector('[data-browseruse-ref="e' + refMatch[1] + '"]'); } catch (e) {}
+		}
+		if (!el) {
+			try { el = document.querySelector(%q); } catch (e) {}
+		}
 		if (!el) {
 			try {
 				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
@@ -261,13 +282,13 @@ func (d *ExtDriver) Click(ctx context.Context, handle, selector string) error {
 		const cx = rect.left + rect.width / 2;
 		const cy = rect.top + rect.height / 2;
 		(%s)(cx, cy, true);
-	}`, selector, selector, selector, jsShowVirtualCursor)
+	}`, selector, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
 	time.Sleep(30 * time.Millisecond) // non-blocking minimal yield: CSS transition runs asynchronously on GPU
 
 	_, err = s.Call(ctx, "page.click", map[string]any{
 		"tabId":    tabID,
-		"selector": selector,
+		"selector": resolveRefSelector(selector),
 	})
 	return err
 }
@@ -286,7 +307,13 @@ func (d *ExtDriver) Type(ctx context.Context, handle, selector, text string) err
 	// Animate virtual cursor to input box before typing
 	jsCursor := fmt.Sprintf(`() => {
 		let el = null;
-		try { el = document.querySelector(%q); } catch (e) {}
+		const refMatch = %q.match(/^@?e(\d+)$/i);
+		if (refMatch) {
+			try { el = document.querySelector('[data-browseruse-ref="e' + refMatch[1] + '"]'); } catch (e) {}
+		}
+		if (!el) {
+			try { el = document.querySelector(%q); } catch (e) {}
+		}
 		if (!el) {
 			try {
 				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
@@ -299,13 +326,13 @@ func (d *ExtDriver) Type(ctx context.Context, handle, selector, text string) err
 		const cx = rect.left + rect.width / 2;
 		const cy = rect.top + rect.height / 2;
 		(%s)(cx, cy, true);
-	}`, selector, selector, jsShowVirtualCursor)
+	}`, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsCursor)
 	time.Sleep(30 * time.Millisecond)
 
 	_, err = s.Call(ctx, "page.type", map[string]any{
 		"tabId":    tabID,
-		"selector": selector,
+		"selector": resolveRefSelector(selector),
 		"text":     text,
 	})
 	return err
@@ -385,7 +412,13 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 	// Always animate prominent virtual cursor to element center
 	jsHover := fmt.Sprintf(`() => {
 		let el = null;
-		try { el = document.querySelector(%q); } catch (e) {}
+		const refMatch = %q.match(/^@?e(\d+)$/i);
+		if (refMatch) {
+			try { el = document.querySelector('[data-browseruse-ref="e' + refMatch[1] + '"]'); } catch (e) {}
+		}
+		if (!el) {
+			try { el = document.querySelector(%q); } catch (e) {}
+		}
 		if (!el) {
 			try {
 				const xp = document.evaluate(%q, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
@@ -408,13 +441,13 @@ func (d *ExtDriver) Hover(ctx context.Context, handle, selector string) error {
 		el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true, clientX: cx, clientY: cy}));
 		el.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true, clientX: cx, clientY: cy}));
 		return true;
-	}`, selector, selector, selector, jsShowVirtualCursor)
+	}`, selector, selector, selector, selector, jsShowVirtualCursor)
 	_, _ = d.Evaluate(ctx, handle, jsHover)
 	time.Sleep(30 * time.Millisecond) // non-blocking minimal yield: CSS transition runs asynchronously on GPU
 
 	_, err = s.Call(ctx, "page.hover", map[string]any{
 		"tabId":    tabID,
-		"selector": selector,
+		"selector": resolveRefSelector(selector),
 	})
 	if err != nil {
 		return nil // already handled by evaluate
@@ -435,7 +468,7 @@ func (d *ExtDriver) Select(ctx context.Context, handle, selector, value string) 
 
 	_, err = s.Call(ctx, "page.select", map[string]any{
 		"tabId":    tabID,
-		"selector": selector,
+		"selector": resolveRefSelector(selector),
 		"value":    value,
 	})
 	if err != nil {
@@ -536,7 +569,7 @@ func (d *ExtDriver) UploadFile(ctx context.Context, handle, selector string, fil
 
 	_, err = s.Call(ctx, "page.uploadFile", map[string]any{
 		"tabId":    tabID,
-		"selector": selector,
+		"selector": resolveRefSelector(selector),
 		"files":    files,
 	})
 	return err

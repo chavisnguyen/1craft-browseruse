@@ -238,19 +238,69 @@ func TestCharacterization_SnapshotFormat(t *testing.T) {
 	expectedSubstrings := []string{
 		fmt.Sprintf("**Tab ID**: `%s`", tabID),
 		"**Page Title**: Characterization Test Page",
-		"**Interactive Elements**:\n```",
-		"- [button] \"Direct Button\" (id=\"direct-btn\" type=\"button\")",
-		"- [link] \"Click Here Link\"",
-		"- [button] \"Action Button\" (type=\"button\")",
-		"- [input] \"initial user\" (id=\"user-input\" type=\"text\")",
-		"- [input] \"secret\" (id=\"pass-input\" type=\"password\")",
-		"- [input] \"initial query\" (id=\"search-input\" name=\"search_query\" type=\"text\")",
-		"- [textarea] \"Initial Description\" (id=\"desc-box\" type=\"textarea\")",
+		"**Interactive Elements**",
+		"@e1 [h1] \"Page Heading\"",
+		"@e2 [button] \"Direct Button\" (id=\"direct-btn\" type=\"button\")",
+		"@e3 [link] \"Click Here Link\"",
+		"@e4 [button] \"Action Button\" (type=\"button\")",
+		"@e5 [input] \"initial user\" (id=\"user-input\" type=\"text\")",
+		"@e6 [input] \"secret\" (id=\"pass-input\" type=\"password\" placeholder=\"Password Placeholder\")",
+		"@e7 [input] \"initial query\" (id=\"search-input\" name=\"search_query\" type=\"text\")",
+		"@e8 [textarea] \"Initial Description\" (id=\"desc-box\" type=\"textarea\")",
 	}
 
 	for _, sub := range expectedSubstrings {
 		if !strings.Contains(summaryStr, sub) {
 			t.Errorf("summary missing expected substring: %q\nFull summary:\n%s", sub, summaryStr)
 		}
+	}
+}
+
+// 5. Characterization: element references (@e1, @e2) direct targeting
+func TestCharacterization_ElementReferences(t *testing.T) {
+	cleanup := createCharacterizationPage(t)
+	defer cleanup()
+
+	tabID, _, err := defaultRouter.Snapshot(context.Background(), "")
+	if err != nil {
+		t.Fatalf("failed to get snapshot: %v", err)
+	}
+
+	// Click via element reference @e2 (Direct Button)
+	_, _, err = defaultRouter.Click(context.Background(), tabID, "@e2")
+	if err != nil {
+		t.Fatalf("failed to click @e2: %v", err)
+	}
+
+	// Type via element reference @e5 (Username Field)
+	_, err = defaultRouter.Type(context.Background(), tabID, "@e5", "element_ref_user", false)
+	if err != nil {
+		t.Fatalf("failed to type into @e5: %v", err)
+	}
+
+	// Verify typed value
+	ref, _ := defaultRouter.GetTab(context.Background(), tabID)
+	page, _ := defaultRodDriver.getPage(ref.handle)
+	el, err := page.Element("#user-input")
+	if err != nil {
+		t.Fatalf("failed to get user-input element: %v", err)
+	}
+	val, err := el.Property("value")
+	if err != nil || val.String() != "element_ref_user" {
+		t.Errorf("expected value 'element_ref_user', got %v (err: %v)", val, err)
+	}
+
+	// Also verify reference without '@' prefix (e.g. 'e7')
+	_, err = defaultRouter.Type(context.Background(), tabID, "e7", "e_prefix_query", false)
+	if err != nil {
+		t.Fatalf("failed to type into e7: %v", err)
+	}
+	el7, err := page.Element("#search-input")
+	if err != nil {
+		t.Fatalf("failed to get search-input element: %v", err)
+	}
+	val7, _ := el7.Property("value")
+	if val7.String() != "e_prefix_query" {
+		t.Errorf("expected value 'e_prefix_query', got %v", val7)
 	}
 }
