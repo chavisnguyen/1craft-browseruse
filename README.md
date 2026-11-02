@@ -17,6 +17,10 @@
 ## ⚡ Highlights
 
 * **Ultra-Lightweight (~12MB RAM):** Written in pure Go with zero heavy Python or Node runtimes. The background daemon serves multiple AI agents while consuming less than 15MB of memory.
+* **Element References (`@e1`, `@e2`...):** Dynamic, zero-token-bloat element identifiers inspired by Claude Code / Anthropic Computer Use. Eliminates selector guessing and hallucinations with sub-millisecond O(1) targeting.
+* **Hybrid Universal Click (SPA-Proof):** Dispatches physical CDP mouse coordinates for authentic cursor interaction while seamlessly bypassing invisible overlay containers in Single Page Apps (YouTube, React, Next.js, Polymer).
+* **Piggybacked Inline Screenshots (`screenshot: bool`):** Action tools (`browser_click`, `browser_type`, `browser_navigate`, `browser_hover`, `browser_press_key`) capture and return visual state directly in the action turn, cutting 50% of roundtrip tool turns.
+* **Compact Action Payloads & Smart Waits:** Action responses return ultra-lean 1-line status summaries instead of dumping massive DOM trees, saving ~90% of context window tokens. Built-in `wait_for` primitives automatically synchronize dynamic page transitions.
 * **Multi-Agent Concurrency & Tab Pooling:** Run one shared daemon (`make daemon`). When multiple AI agents work at the same time, the server automatically assigns and isolates independent tabs (`tab-1`, `tab-2`...), preventing collisions or race conditions.
 * **No macOS Full Disk Access Needed:** Unlike legacy Chrome CDP setups blocked by macOS TCC permissions when reading `DevToolsActivePort`, the 1craft MV3 Chrome Extension bridge connects over authenticated local WebSockets.
 * **Multi-Profile Isolation (`work`, `personal`...):** Connect multiple Chrome profiles simultaneously. Agents can route tasks to designated profiles (e.g., `browser_new_tab(url, profile="work")`). Profile labels can be customized or auto-derived from your logged-in Google Accounts.
@@ -163,15 +167,15 @@ AI agents connected to 1craft BrowserUse have access to **21 production-grade to
 | `browser_new_tab` | `url` *(string)*<br>`profile` *(optional string)* | Opens a new independent browser tab and returns its `tab_id` (e.g. `tab-1`) and page summary. Supports targeting profiles (e.g. `work`). |
 | `browser_list_tabs` | *none* | Lists all active tabs, their assigned profile tags, URLs, page titles, and the current active tab marker. |
 | `browser_close_tab` | `tab_id` *(string)* | Closes a specific tab when the agent finishes its task. |
-| `browser_navigate` | `url` *(string)*<br>`tab_id` *(optional string)* | Navigates the specified (or active) tab to a new URL. |
-| `browser_snapshot` | `tab_id` *(optional string)* | Extracts an interactive accessibility DOM tree with clickable elements, inputs, buttons, and selector IDs. |
-| `browser_click` | `selector` *(string)*<br>`tab_id` *(optional string)* | Clicks an element. Renders the virtual cursor and click ripple animation. |
-| `browser_hover` | `selector` *(string)*<br>`tab_id` *(optional string)* | Hovers over an element to reveal tooltips and dropdown menus. Renders the virtual cursor glide. |
-| `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into an input field or textarea, optionally submitting with `Enter`. |
-| `browser_press_key` | `key` *(string)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
-| `browser_select` | `selector` *(string)*<br>`value` *(string)*<br>`tab_id` *(optional string)* | Selects an option in a `<select>` dropdown by value or text and dispatches change events. |
-| `browser_wait_for` | `selector` *(string)*<br>`timeout_ms` *(optional int)*<br>`state` *(optional string)*<br>`tab_id` *(optional string)* | Waits for an element to become `visible`, `hidden`, or `attached`. |
-| `browser_upload_file` | `selector` *(string)*<br>`files` *(string)*<br>`tab_id` *(optional string)* | Uploads local files to an `<input type='file'>` form element. |
+| `browser_navigate` | `url` *(string)*<br>`wait_for` *(optional string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Navigates the tab to a URL. Supports auto-waiting for selector and inline screenshot capture. |
+| `browser_snapshot` | `tab_id` *(optional string)* | Extracts interactive DOM elements mapped with deterministic references (`@e1`, `@e2`, ...). |
+| `browser_click` | `selector` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Clicks an element by `@e1` reference, CSS selector, or text. Dispatches physical cursor and triggers Hybrid SPA fallback. |
+| `browser_hover` | `selector` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Hovers over an element (`@e1`, CSS, text) to reveal menus. Renders smooth virtual cursor glide. |
+| `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`wait_for` *(optional string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into input field (`@e1` or CSS), optionally submitting with `Enter` and waiting for result element. |
+| `browser_press_key` | `key` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
+| `browser_select` | `selector` *(string)*<br>`value` *(string)*<br>`tab_id` *(optional string)* | Selects an option in a `<select>` dropdown (`@e1` or CSS) by value or text and dispatches change events. |
+| `browser_wait_for` | `selector` *(string)*<br>`timeout_ms` *(optional int)*<br>`state` *(optional string)*<br>`tab_id` *(optional string)* | Waits for an element (`@e1` or CSS) to become `visible`, `hidden`, or `attached`. |
+| `browser_upload_file` | `selector` *(string)*<br>`files` *(string)*<br>`tab_id` *(optional string)* | Uploads local files to an `<input type='file'>` form element (`@e1` or CSS). |
 | `browser_drag_and_drop` | `from` *(string)*<br>`to` *(string)*<br>`tab_id` *(optional string)* | Drags an element and drops it onto a target element with smooth virtual cursor animation. |
 | `browser_scroll` | `direction` *(optional string)*<br>`amount` *(optional int)*<br>`tab_id` *(optional string)* | Scrolls the page (`down`, `up`, `top`, `bottom`) by specified pixels. |
 | `browser_activate_tab` | `tab_id` *(string)* | Brings a tab and its browser window into the visual foreground on screen. |
@@ -180,6 +184,36 @@ AI agents connected to 1craft BrowserUse have access to **21 production-grade to
 | `browser_evaluate` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
 | `get_browser_status`| *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |
 | `browser_close` | *none* | Closes all managed tabs and releases associated browser resources. |
+
+---
+
+## 🎯 Element References & Inline Screenshot Workflow
+
+Inspired by Anthropic Computer Use and Claude Code, 1craft BrowserUse enables agents to browse web apps with extreme speed and zero selector hallucinations:
+
+```text
+1. Agent navigates to page:
+   browser_navigate(url="https://news.ycombinator.com", screenshot=true)
+
+   Response:
+   ✅ Navigated tab `tab-1` to `https://news.ycombinator.com`
+   Interactive Elements:
+   @e1 [a] "Hacker News"
+   @e2 [a] "new"
+   @e3 [a] "comments"
+   @e4 [input] "" (name="q" type="text")
+   📸 Screenshot: /tmp/screenshot-1.png
+
+2. Agent types query and captures result in 1 single turn:
+   browser_type(selector="@e4", text="Golang MCP", press_enter=true, wait_for="article", screenshot=true)
+
+3. Agent clicks article deterministically:
+   browser_click(selector="@e1", screenshot=true)
+```
+
+* **No complex CSS/XPath guessing:** Target `@e1`, `@e2`, `@e3` directly in O(1) time.
+* **No separate screenshot turns:** Set `screenshot: true` on any action to receive instant visual feedback.
+* **Hybrid click resilience:** Automatically clicks target elements even if intercepted by Single Page App overlay divs.
 
 ---
 
