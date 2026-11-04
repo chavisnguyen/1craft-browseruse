@@ -8,9 +8,10 @@ import (
 
 // PageSummary contains basic metadata and extracted interactive elements of a page.
 type PageSummary struct {
-	URL      string
-	Title    string
-	Elements string
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+	Elements string `json:"elements"`
+	Count    int    `json:"count,omitempty"`
 }
 
 // TabInfo represents high-level info about an open tab.
@@ -19,9 +20,11 @@ type TabInfo struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Profile string `json:"profile,omitempty"`
+	Active  bool   `json:"active,omitempty"`
+	GroupID *int   `json:"group_id,omitempty"`
 }
 
-// Driver defines the primitives supported by a browser backend (rod or extension).
+// Driver defines the primitives supported by a browser backend (extension bridge or headless fallback).
 type Driver interface {
 	Name() string
 	Mode() string
@@ -29,7 +32,20 @@ type Driver interface {
 	NewTab(ctx context.Context, url string) (handle string, err error)
 	ListTabs(ctx context.Context, handles []string) ([]TabInfo, error)
 	CloseTab(ctx context.Context, handle string) error
-	Navigate(ctx context.Context, handle, url string) error
+	Navigate(ctx context.Context, handle, url, action string) error
+	ReadPage(ctx context.Context, handle, filter string) (PageSummary, error)
+	Computer(ctx context.Context, handle, action string, params map[string]any) (any, error)
+	FormInput(ctx context.Context, handle, refID string, value any, checked *bool) (any, error)
+	Find(ctx context.Context, handle, query string) (any, error)
+	ReadNetworkRequests(ctx context.Context, handle string, clear bool, filter string) (any, error)
+	ReadConsoleMessages(ctx context.Context, handle string, clear bool) ([]string, error)
+	UploadFile(ctx context.Context, handle, selector string, files []string) error
+	Evaluate(ctx context.Context, handle, script string) (any, error)
+	BrowserBatch(ctx context.Context, handle string, actions []any) (any, error)
+	Screenshot(ctx context.Context, handle string, annotate bool) ([]byte, error)
+	Close() error
+
+	// Compatibility helpers
 	Snapshot(ctx context.Context, handle string) (PageSummary, error)
 	Click(ctx context.Context, handle, selector string) error
 	Hover(ctx context.Context, handle, selector string) error
@@ -37,14 +53,10 @@ type Driver interface {
 	PressKey(ctx context.Context, handle, key string) error
 	Select(ctx context.Context, handle, selector, value string) error
 	WaitFor(ctx context.Context, handle, selector string, timeoutMs int, state string) error
-	UploadFile(ctx context.Context, handle, selector string, files []string) error
 	DragAndDrop(ctx context.Context, handle, fromSelector, toSelector string) error
 	Scroll(ctx context.Context, handle, direction string, amount int) error
 	ActivateTab(ctx context.Context, handle string) error
 	ConsoleLogs(ctx context.Context, handle string, clear bool) ([]string, error)
-	Screenshot(ctx context.Context, handle string, annotate bool) ([]byte, error)
-	Evaluate(ctx context.Context, handle, script string) (any, error)
-	Close() error
 }
 
 func normalizeURL(u string) string {
@@ -60,7 +72,7 @@ func normalizeURL(u string) string {
 }
 
 func formatPageSummary(tabID string, summary PageSummary) string {
-	return fmt.Sprintf("**Tab ID**: `%s`\n**Current URL**: `%s`\n**Page Title**: %s\n\n**Interactive Elements** (target with `@e1`, `@e2` or selector):\n```\n%s\n```",
+	return fmt.Sprintf("**Tab ID**: `%s`\n**Current URL**: `%s`\n**Page Title**: %s\n\n**Accessibility Tree Elements** (target with `@e1`, `@e2` or selector):\n```\n%s\n```",
 		tabID, summary.URL, summary.Title, summary.Elements)
 }
 
@@ -69,6 +81,7 @@ func formatPageSummaryCompact(tabID string, summary PageSummary) string {
 		tabID, summary.URL, summary.Title)
 }
 
+// jsExtractElements for headless rod fallback with password masking & rich ARIA roles
 const jsExtractElements = `() => {
     const oldRefs = document.querySelectorAll('[data-browseruse-ref]');
     for (const el of oldRefs) {
@@ -76,18 +89,30 @@ const jsExtractElements = `() => {
     }
 
     const items = [];
-    const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], h1, h2, h3');
+    const elements = document.querySelectorAll('a, button, input, textarea, select, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="tab"], [role="menuitem"], h1, h2, h3');
     let refCount = 1;
+
+    function isSensitive(el) {
+        const type = (el.getAttribute('type') || '').toLowerCase();
+        if (type === 'password' || type === 'hidden') return true;
+        const auto = (el.getAttribute('autocomplete') || '').toLowerCase();
+        if (auto.includes('password') || auto.includes('one-time-code') || auto.includes('cc-')) return true;
+        return false;
+    }
+
     for (const el of elements) {
-        if (items.length >= 80) break;
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
         const style = window.getComputedStyle(el);
         if (style.display === 'none' || style.visibility === 'hidden') continue;
 
-        const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+        let text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim().replace(/\s+/g, ' ');
+        if (isSensitive(el)) {
+            text = '[REDACTED]';
+        }
+
         const tag = el.tagName.toLowerCase();
-        const role = el.getAttribute('role') || tag;
+        const role = el.getAttribute('role') || (tag === 'a' ? 'link' : tag === 'input' ? (el.type || 'textbox') : tag);
         if (text || tag === 'input' || tag === 'textarea' || tag === 'select') {
             const ref = 'e' + refCount;
             el.setAttribute('data-browseruse-ref', ref);
@@ -97,7 +122,7 @@ const jsExtractElements = `() => {
             if (el.id) meta.push('id="' + el.id + '"');
             if (el.name) meta.push('name="' + el.name + '"');
             if (el.type) meta.push('type="' + el.type + '"');
-            if (el.placeholder && el.placeholder !== text) meta.push('placeholder="' + el.placeholder + '"');
+            if (el.placeholder && el.placeholder !== text && text !== '[REDACTED]') meta.push('placeholder="' + el.placeholder + '"');
             const metaStr = meta.length > 0 ? ' (' + meta.join(' ') + ')' : '';
             const truncText = text.length > 80 ? text.substring(0, 77) + '...' : text;
             items.push('@' + ref + ' [' + role + '] "' + truncText + '"' + metaStr);
@@ -157,23 +182,17 @@ const jsShowVirtualCursor = `(targetX, targetY, isClick) => {
                 <circle cx="6" cy="4" r="3" fill="#ffffff" />
             </svg>
         ` + "`" + `;
-
         const startX = window.__browseruse_last_x !== undefined ? window.__browseruse_last_x : Math.round(window.innerWidth / 2);
         const startY = window.__browseruse_last_y !== undefined ? window.__browseruse_last_y : Math.round(window.innerHeight / 2);
         cursor.style.setProperty('transform', 'translate3d(' + startX + 'px, ' + startY + 'px, 0)', 'important');
         document.documentElement.appendChild(cursor);
-
-        // Force reflow
         void cursor.offsetWidth;
     }
 
-    // Clear previous fade timer and make cursor visible for this action
     if (window.__browseruse_fade_timer) {
         clearTimeout(window.__browseruse_fade_timer);
     }
     cursor.style.setProperty('opacity', '1', 'important');
-
-    // Animate smooth glide to target
     cursor.style.setProperty('transform', 'translate3d(' + targetX + 'px, ' + targetY + 'px, 0)', 'important');
     window.__browseruse_last_x = targetX;
     window.__browseruse_last_y = targetY;
@@ -199,7 +218,6 @@ const jsShowVirtualCursor = `(targetX, targetY, isClick) => {
         }, 400);
     }
 
-    // Auto fade out when agent action completes and becomes idle
     window.__browseruse_fade_timer = setTimeout(() => {
         if (cursor) cursor.style.setProperty('opacity', '0', 'important');
     }, 1500);

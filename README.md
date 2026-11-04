@@ -157,33 +157,36 @@ Then open `chrome://extensions`, enable **Developer mode**, click **Load unpacke
 
 ---
 
-## 🌐 Available MCP Tools
+## 🌐 Available MCP Tools (Claude Code Standard Parity)
 
-AI agents connected to 1craft BrowserUse have access to **21 production-grade tools**:
+AI agents connected to 1craft BrowserUse have access to the **standard Claude Code toolset**:
 
 | Tool | Parameters | Description |
 | :--- | :--- | :--- |
-| `list_profiles` | *none* | Lists all currently connected Chrome Extension profiles (label, signed-in email, active tab count). |
-| `browser_new_tab` | `url` *(string)*<br>`profile` *(optional string)* | Opens a new independent browser tab and returns its `tab_id` (e.g. `tab-1`) and page summary. Supports targeting profiles (e.g. `work`). |
-| `browser_list_tabs` | *none* | Lists all active tabs, their assigned profile tags, URLs, page titles, and the current active tab marker. |
-| `browser_close_tab` | `tab_id` *(string)* | Closes a specific tab when the agent finishes its task. |
-| `browser_navigate` | `url` *(string)*<br>`wait_for` *(optional string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Navigates the tab to a URL. Supports auto-waiting for selector and inline screenshot capture. |
-| `browser_snapshot` | `tab_id` *(optional string)* | Extracts interactive DOM elements mapped with deterministic references (`@e1`, `@e2`, ...). |
-| `browser_click` | `selector` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Clicks an element by `@e1` reference, CSS selector, or text. Dispatches physical cursor and triggers Hybrid SPA fallback. |
-| `browser_hover` | `selector` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Hovers over an element (`@e1`, CSS, text) to reveal menus. Renders smooth virtual cursor glide. |
-| `browser_type` | `selector` *(string)*<br>`text` *(string)*<br>`press_enter` *(optional bool)*<br>`wait_for` *(optional string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Types text into input field (`@e1` or CSS), optionally submitting with `Enter` and waiting for result element. |
-| `browser_press_key` | `key` *(string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Dispatches a keyboard event (e.g. `Enter`, `Escape`, `ArrowDown`, `Tab`). |
-| `browser_select` | `selector` *(string)*<br>`value` *(string)*<br>`tab_id` *(optional string)* | Selects an option in a `<select>` dropdown (`@e1` or CSS) by value or text and dispatches change events. |
-| `browser_wait_for` | `selector` *(string)*<br>`timeout_ms` *(optional int)*<br>`state` *(optional string)*<br>`tab_id` *(optional string)* | Waits for an element (`@e1` or CSS) to become `visible`, `hidden`, or `attached`. |
-| `browser_upload_file` | `selector` *(string)*<br>`files` *(string)*<br>`tab_id` *(optional string)* | Uploads local files to an `<input type='file'>` form element (`@e1` or CSS). |
-| `browser_drag_and_drop` | `from` *(string)*<br>`to` *(string)*<br>`tab_id` *(optional string)* | Drags an element and drops it onto a target element with smooth virtual cursor animation. |
-| `browser_scroll` | `direction` *(optional string)*<br>`amount` *(optional int)*<br>`tab_id` *(optional string)* | Scrolls the page (`down`, `up`, `top`, `bottom`) by specified pixels. |
-| `browser_activate_tab` | `tab_id` *(string)* | Brings a tab and its browser window into the visual foreground on screen. |
-| `browser_console_logs` | `clear` *(optional bool)*<br>`tab_id` *(optional string)* | Retrieves captured JavaScript console logs, errors, and warnings for web debugging. |
-| `browser_screenshot` | `filename` *(optional string)*<br>`annotate` *(optional bool)*<br>`tab_id` *(optional string)* | Captures a PNG screenshot. Set `annotate: true` to overlay Set-of-Mark numbered badges on interactive elements. |
-| `browser_evaluate` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
-| `get_browser_status`| *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |
-| `browser_close` | *none* | Closes all managed tabs and releases associated browser resources. |
+| `read_page` | `filter` *(optional string)*<br>`tab_id` *(optional string)* | Reads page content, URL, title, and interactive element hierarchy mapped with deterministic references (`@e1`, `@e2`, ...) via full **Accessibility Tree (AXTree)**. Automatically redacts passwords, credit cards, and OTPs. |
+| `computer` | `action` *(string: left_click, right_click, double_click, triple_click, middle_click, mouse_move, hover, type, key, scroll, drag, screenshot)*<br>`selector` *(optional string)*<br>`text` *(optional string)*<br>`key` *(optional string)*<br>`direction` *(optional string)*<br>`amount` *(optional int)*<br>`from` *(optional string)*<br>`to` *(optional string)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Unified mouse, keyboard, and screen interaction. Dispatches physical cursor with natural **Fitts's Law physics motion**, elbow curved arcs, and dynamic tilt. Suppresses visual overlays during screenshots. |
+| `form_input` | `ref_id` *(string)*<br>`value` *(optional string)*<br>`checked` *(optional bool)*<br>`tab_id` *(optional string)* | Smart form control: fills textboxes, sets dropdown options, or toggles checkboxes/radio buttons by reference (`@e1`). |
+| `navigate` | `url` *(optional string)*<br>`action` *(optional string: back, forward, reload)*<br>`screenshot` *(optional bool)*<br>`tab_id` *(optional string)* | Navigates the tab to a URL or executes browser history navigation (`back`, `forward`, `reload`). |
+| `find` | `query` *(string)*<br>`tab_id` *(optional string)* | Semantic natural language search to find elements on the page (e.g. `'Sign In button'`, `'pricing plans'`). |
+| `read_network_requests` | `clear` *(optional bool)*<br>`filter` *(optional string)*<br>`tab_id` *(optional string)* | Inspects captured HTTP/Fetch/XHR network requests and API responses (URL, method, status, mimeType) for debugging. |
+| `read_console_messages` | `clear` *(optional bool)*<br>`tab_id` *(optional string)* | Retrieves captured JavaScript console logs, errors, and warnings for web debugging. |
+| `file_upload` | `selector` *(string)*<br>`files` *(string)*<br>`tab_id` *(optional string)* | Uploads local files to an `<input type='file'>` form element (`@e1` or CSS). |
+| `javascript_tool` | `script` *(string)*<br>`tab_id` *(optional string)* | Evaluates arbitrary JavaScript code in the context of the page and returns the result. |
+| `tabs_context_mcp` | *none* | Returns the current browser context: managed tabs, URLs, titles, active tab marker, and Chrome Tab Group status. |
+| `tabs_create_mcp` | `url` *(optional string)*<br>`profile` *(optional string)* | Opens a new independent browser tab inside the managed **OneCraft Agent** Chrome Tab Group. |
+| `tabs_close_mcp` | `tab_id` *(string)* | Closes a specific tab when the agent finishes its task. |
+| `browser_batch` | `actions` *(JSON array of action objects)*<br>`tab_id` *(optional string)* | Executes a batch of sequential computer/navigate actions in a single roundtrip to eliminate latency. |
+| `get_browser_status` | *none* | Returns comprehensive system diagnostics, connected extension profiles, and open tab allocations. |
+
+---
+
+## 🎨 Visual Identity & Safety Layer (Matching Claude in Chrome)
+
+* **Terracotta Glowing Border (`claude-agent-glow-border`):** When an agent is actively reading or controlling a window/tab, the entire viewport illuminates with Anthropic's signature terracotta pulsing glow (`rgba(217, 119, 87, ...)`).
+* **Emergency Stop HUD (`claude-agent-stop-container`):** A sleek frosted-glass floating pill at the bottom center of the screen shows what the AI is currently doing and includes an instant **Stop** button. Clicking it immediately aborts agent execution.
+* **Fitts's Law Physics Cursor (`ClaudeCursorMotion`):** The cursor moves with natural human-like kinematics: curved elbow arcs, velocity-based tilt lean, and micro-overshoot haptic settling.
+* **Clean Screenshot Suppression:** Visual indicators automatically hide during screenshots (`hidden_for_screenshot`) so vision models receive unpolluted page images.
+* **Security & Credential Masking:** Passwords, credit cards, CVVs, and OTPs are automatically redacted as `[REDACTED]` in accessibility tree snapshots.
 
 ---
 

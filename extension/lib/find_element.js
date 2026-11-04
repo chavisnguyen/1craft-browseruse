@@ -1,11 +1,14 @@
 /**
- * find_element.js reproduces rod's findElement 4-strategy algorithm inside the browser page context.
- *
- * Strategies:
- * 1. Direct selector (CSS, XPath)
- * 2. Button, Link with matching text (including Playwright-style :has-text("..."))
- * 3. Label, placeholder, or input name match
- * 4. Any element with text (deepest leaf match priority)
+ * find_element.js - Element locator, universal form input, and semantic element search.
+ * Supports:
+ * - Deterministic references (@e1, e1)
+ * - XPath and CSS selectors
+ * - Playwright-style :has-text("...")
+ * - Button/Link text matching
+ * - ARIA label, placeholder, name matching
+ * - Deepest leaf text matching
+ * - Form input: value filling, checkbox/radio toggling, select dropdowns
+ * - Semantic element search (for the 'find' tool)
  */
 
 export function findElementInPage(target, action, extraArg) {
@@ -32,17 +35,22 @@ export function findElementInPage(target, action, extraArg) {
   }
 
   function findOnce() {
-    // 0. Element reference (@e1, e1)
+    // 0. Element reference (@e1, e1) via memory map or DOM attribute
     const refMatch = clean.match(/^@?e(\d+)$/i);
     if (refMatch) {
+      const refKey = 'e' + refMatch[1];
+      if (window.__claudeElementMap && window.__claudeElementMap[refKey]) {
+        const memEl = window.__claudeElementMap[refKey];
+        if (memEl && memEl.isConnected && isVisible(memEl)) {
+          return memEl;
+        }
+      }
       try {
-        const refEl = document.querySelector(`[data-browseruse-ref="e${refMatch[1]}"]`);
+        const refEl = document.querySelector(`[data-browseruse-ref="${refKey}"]`);
         if (refEl && isVisible(refEl)) {
           return refEl;
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     }
 
     // 1. XPath if starts with / or (
@@ -59,9 +67,7 @@ export function findElementInPage(target, action, extraArg) {
         if (node instanceof Element && isVisible(node)) {
           return node;
         }
-      } catch {
-        // ignore xpath error
-      }
+      } catch {}
     }
 
     // 1b. Direct CSS selector
@@ -70,17 +76,13 @@ export function findElementInPage(target, action, extraArg) {
       if (el && isVisible(el)) {
         return el;
       }
-    } catch {
-      // ignore invalid selector
-    }
+    } catch {}
 
     // Compile regex for clean text
     let reg = null;
     try {
       reg = new RegExp(clean, 'i');
-    } catch {
-      // fallback to substring
-    }
+    } catch {}
 
     function textMatches(str) {
       if (!str) return false;
@@ -90,7 +92,7 @@ export function findElementInPage(target, action, extraArg) {
 
     // 2. Button, a, [role='button'], [role='link']
     const interactive = document.querySelectorAll(
-      "button, a, [role='button'], [role='link']"
+      "button, a, [role='button'], [role='link'], [role='tab'], [role='menuitem']"
     );
     for (const el of interactive) {
       if (!isVisible(el)) continue;
@@ -110,9 +112,7 @@ export function findElementInPage(target, action, extraArg) {
           return el;
         }
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     // 4. Any element with text (deepest element priority)
     const all = document.querySelectorAll('*');
@@ -135,7 +135,6 @@ export function findElementInPage(target, action, extraArg) {
       const t = (el.innerText || el.textContent || '').trim();
       if (!textMatches(t)) continue;
 
-      // Check if any visible child also matches
       let childMatches = false;
       for (const child of el.children) {
         if (!isVisible(child)) continue;
@@ -164,8 +163,8 @@ export function findElementInPage(target, action, extraArg) {
     return null;
   }
 
-  // Polling with retry up to 2 seconds (matching rod's 2s timeout)
-  return new Promise((resolve, reject) => {
+  // Polling with retry up to 2 seconds
+  return new Promise((resolve) => {
     const startTime = Date.now();
 
     function poll() {
@@ -215,6 +214,60 @@ export function findElementInPage(target, action, extraArg) {
           el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true, clientX: center.x, clientY: center.y }));
           el.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true, clientX: center.x, clientY: center.y }));
           resolve({ found: true, center });
+          return;
+        }
+
+        if (action === 'form_input') {
+          const tag = el.tagName.toLowerCase();
+          const type = (el.getAttribute('type') || '').toLowerCase();
+          const argObj = typeof extraArg === 'object' && extraArg !== null ? extraArg : { value: String(extraArg || '') };
+
+          // 1. Checkbox or Radio
+          if (type === 'checkbox' || type === 'radio' || el.getAttribute('role') === 'switch' || el.getAttribute('role') === 'checkbox') {
+            const shouldBeChecked = argObj.checked !== undefined ? Boolean(argObj.checked) : !el.checked;
+            if (el.checked !== shouldBeChecked) {
+              el.checked = shouldBeChecked;
+              if (el.setAttribute) el.setAttribute('aria-checked', String(shouldBeChecked));
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            }
+            resolve({ found: true, center, type: 'checkbox', checked: el.checked });
+            return;
+          }
+
+          // 2. Select dropdown
+          if (tag === 'select') {
+            const val = String(argObj.value || '').toLowerCase().trim();
+            let matchedOption = null;
+            for (const opt of el.options) {
+              if (opt.value.toLowerCase() === val || opt.text.toLowerCase().includes(val)) {
+                matchedOption = opt;
+                break;
+              }
+            }
+            if (matchedOption) {
+              el.value = matchedOption.value;
+              matchedOption.selected = true;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+              resolve({ found: true, center, type: 'select', selected: matchedOption.value });
+              return;
+            }
+          }
+
+          // 3. Text input, textarea, contenteditable
+          el.focus();
+          const textVal = String(argObj.value !== undefined ? argObj.value : '');
+          if (tag === 'input' || tag === 'textarea') {
+            el.value = textVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (el.isContentEditable) {
+            el.innerText = textVal;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+          resolve({ found: true, center, type: 'textbox', value: textVal });
           return;
         }
 
@@ -295,6 +348,42 @@ export function findElementInPage(target, action, extraArg) {
   });
 }
 
+/**
+ * Searches the page for elements matching a natural language query or text.
+ */
+export function findElementsQueryInPage(query) {
+  const q = (query || '').toLowerCase().trim();
+  if (!q) return [];
+
+  const candidates = document.querySelectorAll('a, button, input, textarea, select, [role], h1, h2, h3, p, span');
+  const matches = [];
+
+  for (const el of candidates) {
+    if (matches.length >= 15) break;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+    const text = (el.innerText || el.value || el.getAttribute('aria-label') || el.placeholder || '').trim();
+    if (text.toLowerCase().includes(q)) {
+      const ref = el.getAttribute('data-browseruse-ref') || '';
+      matches.push({
+        ref: ref ? '@' + ref : '',
+        tag: el.tagName.toLowerCase(),
+        role: el.getAttribute('role') || el.tagName.toLowerCase(),
+        text: text.slice(0, 80),
+        center: {
+          x: Math.round(rect.left + rect.width / 2),
+          y: Math.round(rect.top + rect.height / 2),
+        },
+      });
+    }
+  }
+
+  return matches;
+}
+
 export function waitForElementInPage(target, timeoutMs, state) {
   target = (target || '').trim();
   timeoutMs = timeoutMs > 0 ? timeoutMs : 5000;
@@ -312,9 +401,7 @@ export function waitForElementInPage(target, timeoutMs, state) {
         } else {
           el = document.querySelector(target);
         }
-      } catch {
-        // ignore selector error
-      }
+      } catch {}
 
       const isAttached = el instanceof Element;
       let isVis = false;
@@ -351,4 +438,3 @@ export function waitForElementInPage(target, timeoutMs, state) {
     check();
   });
 }
-

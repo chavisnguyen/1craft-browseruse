@@ -253,7 +253,7 @@ func (r *Router) CloseAll(ctx context.Context) {
 	_ = r.rod.Close()
 }
 
-func (r *Router) Navigate(ctx context.Context, tabID, url string) (string, string, PageSummary, error) {
+func (r *Router) Navigate(ctx context.Context, tabID, url, action string) (string, string, PageSummary, error) {
 	r.mu.Lock()
 	ref, err := r.getTabRefLocked(ctx, tabID)
 	r.mu.Unlock()
@@ -261,18 +261,105 @@ func (r *Router) Navigate(ctx context.Context, tabID, url string) (string, strin
 		return "", "", PageSummary{}, err
 	}
 
-	if err := ref.driver.Navigate(ctx, ref.handle, url); err != nil {
+	if err := ref.driver.Navigate(ctx, ref.handle, url, action); err != nil {
 		return ref.tabID, "", PageSummary{}, err
 	}
 
 	mode := ref.driver.Mode()
 
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
+	summary, err := ref.driver.ReadPage(ctx, ref.handle, "interactive")
 	if err != nil {
 		return ref.tabID, mode, PageSummary{}, err
 	}
 
 	return ref.tabID, mode, summary, nil
+}
+
+func (r *Router) ReadPage(ctx context.Context, tabID, filter string) (string, PageSummary, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", PageSummary{}, err
+	}
+
+	summary, err := ref.driver.ReadPage(ctx, ref.handle, filter)
+	if err != nil {
+		return ref.tabID, PageSummary{}, err
+	}
+	return ref.tabID, summary, nil
+}
+
+func (r *Router) Computer(ctx context.Context, tabID, action string, params map[string]any) (string, any, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	res, err := ref.driver.Computer(ctx, ref.handle, action, params)
+	return ref.tabID, res, err
+}
+
+func (r *Router) FormInput(ctx context.Context, tabID, refID string, value any, checked *bool) (string, any, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	res, err := ref.driver.FormInput(ctx, ref.handle, refID, value, checked)
+	return ref.tabID, res, err
+}
+
+func (r *Router) Find(ctx context.Context, tabID, query string) (string, any, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	res, err := ref.driver.Find(ctx, ref.handle, query)
+	return ref.tabID, res, err
+}
+
+func (r *Router) ReadNetworkRequests(ctx context.Context, tabID string, clear bool, filter string) (string, any, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	res, err := ref.driver.ReadNetworkRequests(ctx, ref.handle, clear, filter)
+	return ref.tabID, res, err
+}
+
+func (r *Router) ReadConsoleMessages(ctx context.Context, tabID string, clear bool) (string, []string, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	logs, err := ref.driver.ReadConsoleMessages(ctx, ref.handle, clear)
+	return ref.tabID, logs, err
+}
+
+func (r *Router) BrowserBatch(ctx context.Context, tabID string, actions []any) (string, any, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return "", nil, err
+	}
+
+	res, err := ref.driver.BrowserBatch(ctx, ref.handle, actions)
+	return ref.tabID, res, err
 }
 
 func (r *Router) Snapshot(ctx context.Context, tabID string) (string, PageSummary, error) {

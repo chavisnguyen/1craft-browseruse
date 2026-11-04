@@ -238,15 +238,15 @@ func TestCharacterization_SnapshotFormat(t *testing.T) {
 	expectedSubstrings := []string{
 		fmt.Sprintf("**Tab ID**: `%s`", tabID),
 		"**Page Title**: Characterization Test Page",
-		"**Interactive Elements**",
+		"**Accessibility Tree Elements**",
 		"@e1 [h1] \"Page Heading\"",
-		"@e2 [button] \"Direct Button\" (id=\"direct-btn\" type=\"button\")",
+		"@e2 [button] \"Direct Button\"",
 		"@e3 [link] \"Click Here Link\"",
-		"@e4 [button] \"Action Button\" (type=\"button\")",
-		"@e5 [input] \"initial user\" (id=\"user-input\" type=\"text\")",
-		"@e6 [input] \"secret\" (id=\"pass-input\" type=\"password\" placeholder=\"Password Placeholder\")",
-		"@e7 [input] \"initial query\" (id=\"search-input\" name=\"search_query\" type=\"text\")",
-		"@e8 [textarea] \"Initial Description\" (id=\"desc-box\" type=\"textarea\")",
+		"@e4 [button] \"Action Button\"",
+		"@e5 [text] \"initial user\"",
+		"@e6 [password] \"[REDACTED]\"",
+		"@e7 [text] \"initial query\"",
+		"@e8 [textarea] \"Initial Description\"",
 	}
 
 	for _, sub := range expectedSubstrings {

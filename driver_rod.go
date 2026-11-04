@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
@@ -251,10 +252,25 @@ func (d *RodDriver) CloseTab(ctx context.Context, handle string) error {
 	return fmt.Errorf("rod handle '%s' not found", handle)
 }
 
-func (d *RodDriver) Navigate(ctx context.Context, handle, url string) error {
+func (d *RodDriver) Navigate(ctx context.Context, handle, url, action string) error {
 	p, err := d.getPage(handle)
 	if err != nil {
 		return err
+	}
+
+	action = strings.ToLower(action)
+	if action == "back" {
+		_ = p.NavigateBack()
+		_ = p.WaitLoad()
+		return nil
+	} else if action == "forward" {
+		_ = p.NavigateForward()
+		_ = p.WaitLoad()
+		return nil
+	} else if action == "reload" {
+		_ = p.Reload()
+		_ = p.WaitLoad()
+		return nil
 	}
 
 	url = normalizeURL(url)
@@ -264,6 +280,113 @@ func (d *RodDriver) Navigate(ctx context.Context, handle, url string) error {
 	_ = p.WaitLoad()
 	time.Sleep(1 * time.Second)
 	return nil
+}
+
+func (d *RodDriver) ReadPage(ctx context.Context, handle, filter string) (PageSummary, error) {
+	return d.Snapshot(ctx, handle)
+}
+
+func (d *RodDriver) Computer(ctx context.Context, handle, action string, params map[string]any) (any, error) {
+	action = strings.ToLower(action)
+	selector, _ := params["selector"].(string)
+
+	switch action {
+	case "left_click", "click", "right_click", "double_click", "triple_click", "middle_click":
+		err := d.Click(ctx, handle, selector)
+		return map[string]any{"action": action, "clicked": err == nil}, err
+	case "type":
+		text, _ := params["text"].(string)
+		err := d.Type(ctx, handle, selector, text)
+		return map[string]any{"action": action, "typed": err == nil}, err
+	case "key", "press_key":
+		key, _ := params["key"].(string)
+		err := d.PressKey(ctx, handle, key)
+		return map[string]any{"action": action, "pressed": err == nil}, err
+	case "hover", "mouse_move":
+		err := d.Hover(ctx, handle, selector)
+		return map[string]any{"action": action, "hovered": err == nil}, err
+	case "scroll":
+		dir, _ := params["direction"].(string)
+		amt := 500
+		if a, ok := params["amount"].(float64); ok {
+			amt = int(a)
+		} else if a, ok := params["amount"].(int); ok {
+			amt = a
+		}
+		err := d.Scroll(ctx, handle, dir, amt)
+		return map[string]any{"action": action, "scrolled": err == nil}, err
+	case "drag", "drag_and_drop":
+		from, _ := params["from"].(string)
+		to, _ := params["to"].(string)
+		err := d.DragAndDrop(ctx, handle, from, to)
+		return map[string]any{"action": action, "dragged": err == nil}, err
+	case "screenshot":
+		bytes, err := d.Screenshot(ctx, handle, false)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"action": action, "pngBase64": base64.StdEncoding.EncodeToString(bytes)}, nil
+	default:
+		return nil, fmt.Errorf("unsupported rod computer action: %s", action)
+	}
+}
+
+func (d *RodDriver) FormInput(ctx context.Context, handle, refID string, value any, checked *bool) (any, error) {
+	if checked != nil {
+		p, err := d.getPage(handle)
+		if err != nil {
+			return nil, err
+		}
+		el, err := findElement(p, refID)
+		if err != nil {
+			return nil, err
+		}
+		_ = el.Click(proto.InputMouseButtonLeft, 1)
+		return map[string]any{"checked": *checked}, nil
+	}
+	if value != nil {
+		strVal := fmt.Sprintf("%v", value)
+		err := d.Type(ctx, handle, refID, strVal)
+		return map[string]any{"value": strVal}, err
+	}
+	return nil, nil
+}
+
+func (d *RodDriver) Find(ctx context.Context, handle, query string) (any, error) {
+	p, err := d.getPage(handle)
+	if err != nil {
+		return nil, err
+	}
+	el, err := findElement(p, query)
+	if err != nil {
+		return map[string]any{"query": query, "matches": []any{}}, nil
+	}
+	text, _ := el.Text()
+	return map[string]any{"query": query, "matches": []any{map[string]any{"text": text}}}, nil
+}
+
+func (d *RodDriver) ReadNetworkRequests(ctx context.Context, handle string, clear bool, filter string) (any, error) {
+	return map[string]any{"requests": []any{}}, nil
+}
+
+func (d *RodDriver) ReadConsoleMessages(ctx context.Context, handle string, clear bool) ([]string, error) {
+	return d.ConsoleLogs(ctx, handle, clear)
+}
+
+func (d *RodDriver) BrowserBatch(ctx context.Context, handle string, actions []any) (any, error) {
+	var results []any
+	for _, act := range actions {
+		if actMap, ok := act.(map[string]any); ok {
+			action, _ := actMap["action"].(string)
+			res, err := d.Computer(ctx, handle, action, actMap)
+			if err != nil {
+				results = append(results, map[string]any{"error": err.Error()})
+			} else {
+				results = append(results, res)
+			}
+		}
+	}
+	return map[string]any{"results": results}, nil
 }
 
 func (d *RodDriver) Snapshot(ctx context.Context, handle string) (PageSummary, error) {
