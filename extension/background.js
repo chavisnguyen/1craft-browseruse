@@ -842,9 +842,28 @@ async function handleRequest(msg) {
       case 'page.evaluate': {
         const tabId = params.tabId;
         const script = params.script || '';
+        const hasDebugger = await ensureDebuggerAttached(tabId);
+        if (hasDebugger) {
+          try {
+            const evalRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+              expression: script,
+              returnByValue: true,
+              awaitPromise: true,
+            });
+            if (evalRes && evalRes.exceptionDetails) {
+              const ex = evalRes.exceptionDetails;
+              const msg = (ex.exception && (ex.exception.description || ex.exception.value)) || ex.text || 'Runtime error';
+              return { type: 'res', id, result: { value: { error: msg } } };
+            }
+            if (evalRes && evalRes.result) {
+              return { type: 'res', id, result: { value: evalRes.result.value } };
+            }
+          } catch (cdpErr) {
+            console.warn('CDP Runtime.evaluate error, trying fallback:', cdpErr);
+          }
+        }
         const results = await chrome.scripting.executeScript({
           target: { tabId },
-          world: 'MAIN',
           func: (codeStr) => {
             try {
               return (0, eval)(codeStr);

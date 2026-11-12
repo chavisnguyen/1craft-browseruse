@@ -423,6 +423,14 @@ func main() {
 		mux.Handle("/mcp", streamableServer)
 		mux.Handle("/sse", streamableServer)
 		mux.Handle("/ext", defaultExtHub)
+		mux.HandleFunc("/reload-ext", func(w http.ResponseWriter, r *http.Request) {
+			for _, p := range defaultExtHub.OnlineProfiles() {
+				if s, ok := defaultExtHub.GetSession(p); ok {
+					s.Call(r.Context(), "ext.reload", nil)
+				}
+			}
+			w.Write([]byte("reloaded"))
+		})
 
 		// Explicitly return 404 for OAuth checks so client immediately knows no auth is needed
 		mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
