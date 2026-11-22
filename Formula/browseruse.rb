@@ -13,20 +13,20 @@ class Browseruse < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.0/1craft-browseruse-darwin-arm64.tar.gz"
-      sha256 "a6bfafd4d252e860a45e0fe11a2a666eeeb827bf8209a8ed2f6e932c44a3c59d"
+      url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.1/1craft-browseruse-darwin-arm64.tar.gz"
+      sha256 "e80d3a79c4c70ff858a23e683469a68c8f00f4aecd21253a3254866e289128c7"
     end
     on_intel do
-      url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.0/1craft-browseruse-darwin-amd64.tar.gz"
-      sha256 "8bc43dbb44c3e90ae9b64d7c755d376639597520faa730dcfa0936bfa7d1a957"
+      url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.1/1craft-browseruse-darwin-amd64.tar.gz"
+      sha256 "101469e7fd64a64942cd15f53abec869375980c8ee524fd21cfb13ceb4d302db"
     end
   end
 
   on_linux do
     # Prebuilt Linux binaries are x86_64 only.
     depends_on arch: :x86_64
-    url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.0/1craft-browseruse-linux-amd64.tar.gz"
-    sha256 "b74b2a052f2eb1507ce0e26ca92ab22e302b946d1dd478aa24bd147bcdfddcdc"
+    url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.1/1craft-browseruse-linux-amd64.tar.gz"
+    sha256 "38ced5e4f776cda9b2baf6ca99f260a27dc4ebed3d4ca694f497e43905f2a54c"
   end
 
   def install
