@@ -8,9 +8,18 @@ A tiny (~12MB RAM) local [MCP](https://modelcontextprotocol.io) server written i
 
 ## 🚀 Get started (3 steps, ~2 minutes)
 
-**You need:** macOS/Linux, Google Chrome, [Go 1.22+](https://golang.org) (or use Homebrew below).
+### 1. Install
 
-### 1. Run setup
+**Option A — Homebrew (no Go needed, recommended)**
+
+```bash
+brew tap chavisnguyen/browseruse https://github.com/chavisnguyen/1craft-browseruse
+brew install browseruse
+brew services start browseruse   # background daemon
+browseruse setup                 # token + extension + register MCP in your agents
+```
+
+**Option B — From source** (needs [Go 1.22+](https://golang.org))
 
 ```bash
 git clone https://github.com/chavisnguyen/1craft-browseruse.git
@@ -18,25 +27,16 @@ cd 1craft-browseruse
 make setup
 ```
 
-This builds the binary, creates a token, registers the MCP server in your installed agents (Claude Code, Codex, Cursor, Claude Desktop, OpenCode, Kiro, AGY), and starts the daemon.
-
-<details>
-<summary>Prefer Homebrew (no Go needed)?</summary>
-
-```bash
-brew tap chavisnguyen/browseruse
-brew install browseruse
-brew services start browseruse
-1craft-browseruse -token      # you'll paste this in the extension
-```
-Extension folder: `$(brew --prefix)/share/browseruse/extension` — in step 2, open the extension **Options**, paste the token and click **Save & Connect**.
-</details>
+Both options create a token, prepare an auto-connecting extension, register the MCP server in your installed agents (Claude Code, Codex, Cursor, Claude Desktop, OpenCode, Kiro, AGY) and start/prepare the daemon. Safe to re-run.
 
 ### 2. Load the extension in Chrome
 
 1. Open `chrome://extensions` and turn on **Developer mode** (top-right).
-2. Click **Load unpacked** and choose the `extension/` folder.
-   (`make setup` already copied its path to your clipboard: press `Cmd+Shift+G`, `Cmd+V`, `Enter`.)
+2. Click **Load unpacked** and choose the folder printed by setup:
+   * Homebrew: `~/.1craft-browseruse/extension`
+   * Source: the repo's `extension/` folder
+
+   (The path is already in your clipboard: press `Cmd+Shift+G`, `Cmd+V`, `Enter`.)
 
 It connects automatically — no token to paste.
 
@@ -48,11 +48,13 @@ Restart your agent, then ask:
 
 A terracotta glow around the page means the agent is controlling that tab. Click **Stop** in the top pill to abort.
 
-**Something wrong?** Run `make doctor` — it checks everything and tells you what to fix.
+**Something wrong?** Run `browseruse doctor` (Homebrew) or `make doctor` (source) — it checks everything and tells you what to fix.
 
 ---
 
 ## 🧰 Everyday commands
+
+Homebrew users: `browseruse setup | doctor | -token` and `brew services restart browseruse`. From source:
 
 | Command | What it does |
 | :--- | :--- |
@@ -71,11 +73,11 @@ Other targets (`make help`): `install`, `install-stdio`, `chrome`, `test`, `clea
 
 | Problem | Fix |
 | :--- | :--- |
-| Extension shows "Disconnected" / red badge | `make restart`, then `make doctor`. If still red: `make token`, paste in extension **Options** → **Save & Connect**. |
+| Extension shows "Disconnected" / red badge | Restart the daemon (`brew services restart browseruse` / `make restart`), then run `doctor`. If still red: run `browseruse setup` again and reload the extension from the printed folder. |
 | Yellow bar "started debugging this browser" | Normal — Chrome shows it whenever an extension controls a tab. |
 | "multiple extension profiles online" | Several Chrome profiles are connected. Tell the agent which one (e.g. "use the work profile"), or check with `get_browser_status`. |
 | "label_in_use" | Two profiles share a label. Rename one in extension **Options**. |
-| Agent doesn't see the browser tools | Restart the agent after `make setup`. Endpoint is `http://localhost:3025/mcp`. |
+| Agent doesn't see the browser tools | Restart the agent after setup. Endpoint is `http://localhost:3025/mcp`. |
 
 ---
 
