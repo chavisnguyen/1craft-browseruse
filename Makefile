@@ -129,6 +129,8 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
+	@echo "  make setup         - ⭐ Cài đặt 1 lần: build, token, đăng ký MCP, chạy daemon"
+	@echo "  make doctor        - Chẩn đoán lỗi và gợi ý cách sửa"
 	@echo "  make daemon        - Bật SSE Server ngầm (Port 3025) cho nhiều Agent"
 	@echo "  make stop          - Dừng SSE Server"
 	@echo "  make restart       - Khởi động lại SSE Server"
