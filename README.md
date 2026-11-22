@@ -41,17 +41,33 @@ A terracotta glow around the page means the agent is controlling that tab. Click
 
 ---
 
-## 🧰 Everyday commands
+## 🧰 Commands
+
+Run `browseruse help` anytime to see this list in your terminal.
 
 | Command | What it does |
 | :--- | :--- |
-| `browseruse doctor` | Diagnose problems |
-| `browseruse setup` | Re-run setup (after upgrading, or if an agent was installed later) |
+| `browseruse setup` | One-time setup. Re-run after upgrading or after installing a new agent |
+| `browseruse doctor` | Check everything and suggest fixes |
+| `browseruse help` | Show all commands and flags |
+| `browseruse version` | Print the version |
 | `browseruse -token` | Print the auth token |
-| `brew services restart browseruse` | Restart the daemon |
-| `brew services stop browseruse` | Stop the daemon |
+| `browseruse` | Run the daemon in the foreground (HTTP, port 3025; `-port N` to change). Normally you use the brew service instead |
+| `browseruse -stdio` | Stdio MCP server for clients without HTTP support (cannot use the Chrome extension) |
+
+Daemon and package management:
+
+| Command | What it does |
+| :--- | :--- |
+| `brew services start browseruse` | Start the background daemon (auto-starts at login) |
+| `brew services restart browseruse` | Restart it |
+| `brew services stop browseruse` | Stop it |
 | `brew upgrade browseruse` | Update, then run `browseruse setup` and reload the extension at `chrome://extensions` |
 | `brew uninstall browseruse` | Uninstall (also `rm -rf ~/.1craft-browseruse` to remove token and extension copy) |
+
+### Window mode
+
+By default the agent opens tabs in your **current Chrome window**. To keep agent tabs in a separate window instead, open the extension **Options** and set *Window mode* to *Dedicated window*.
 
 ---
 
@@ -64,6 +80,7 @@ A terracotta glow around the page means the agent is controlling that tab. Click
 | "multiple extension profiles online" | Several Chrome profiles are connected. Tell the agent which one (e.g. "use the work profile"), or check with `get_browser_status`. |
 | "label_in_use" | Two profiles share a label. Rename one in extension **Options**. |
 | Agent doesn't see the browser tools | Restart the agent after setup. Endpoint is `http://localhost:3025/mcp`. |
+| Claude Desktop can't use your logged-in browser | Claude Desktop only supports stdio, which can't use the extension. Other agents (Claude Code, Codex, Cursor, …) work fully. |
 | `brew tap` fails or formula not found | Use the full tap command above, including the repo URL. If you tapped the old `homebrew-browseruse` repo: `brew untap chavisnguyen/browseruse` first. |
 
 ---
