@@ -23,10 +23,10 @@ class Browseruse < Formula
   end
 
   on_linux do
-    on_intel do
-      url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.0/1craft-browseruse-linux-amd64.tar.gz"
-      sha256 "b74b2a052f2eb1507ce0e26ca92ab22e302b946d1dd478aa24bd147bcdfddcdc"
-    end
+    # Prebuilt Linux binaries are x86_64 only.
+    depends_on arch: :x86_64
+    url "https://github.com/chavisnguyen/1craft-browseruse/releases/download/v2.0.0/1craft-browseruse-linux-amd64.tar.gz"
+    sha256 "b74b2a052f2eb1507ce0e26ca92ab22e302b946d1dd478aa24bd147bcdfddcdc"
   end
 
   def install
