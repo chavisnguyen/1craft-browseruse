@@ -430,7 +430,23 @@ func main() {
 	tokenFlag := flag.Bool("token", false, "Print auth token for Chrome extension and exit")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
 	vFlag := flag.Bool("v", false, "Print version and exit")
+	flag.Usage = printUsage
 	flag.Parse()
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "help":
+			printUsage()
+			return
+		case "version", "setup", "doctor":
+		default:
+			if !strings.HasPrefix(os.Args[1], "-") {
+				fmt.Fprintf(os.Stderr, "Unknown command %q\n\n", os.Args[1])
+				printUsage()
+				os.Exit(2)
+			}
+		}
+	}
 
 	if *versionFlag || *vFlag || (len(os.Args) > 1 && os.Args[1] == "version") {
 		fmt.Printf("1craft-browseruse v%s\n", Version)
@@ -591,4 +607,30 @@ func runDoctor(port string) {
 	}
 
 	fmt.Printf("\n✨ Everything looks healthy! Endpoint for AI agents: http://localhost:%s/mcp\n", port)
+}
+
+func printUsage() {
+	out := flag.CommandLine.Output()
+	fmt.Fprintf(out, `1craft BrowserUse v%s — let your AI agent use your real Chrome
+
+Usage:
+  browseruse <command>
+  browseruse [flags]
+
+Commands:
+  setup      One-time setup: token, Chrome extension, register MCP in your agents
+  doctor     Check that everything works and suggest fixes
+  version    Print version
+  help       Show this help
+
+Common tasks:
+  brew services start browseruse     Start the background daemon
+  browseruse -token                  Print the auth token
+  browseruse -sse -port 3025         Run the daemon in the foreground
+
+Running with no command starts the MCP server in stdio mode (used by agents).
+
+Flags:
+`, Version)
+	flag.PrintDefaults()
 }
