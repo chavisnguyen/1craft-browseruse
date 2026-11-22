@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -370,6 +369,54 @@ func setupMCPServer() *server.MCPServer {
 	return s
 }
 
+func setupHTTPHandler(s *server.MCPServer) http.Handler {
+	streamableServer := server.NewStreamableHTTPServer(s,
+		server.WithStreamableHTTPCORS(),
+	)
+
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", streamableServer)
+	mux.Handle("/sse", streamableServer)
+	mux.Handle("/ext", defaultExtHub)
+	mux.HandleFunc("/reload-ext", func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range defaultExtHub.OnlineProfiles() {
+			if sess, ok := defaultExtHub.GetSession(p); ok {
+				sess.Call(r.Context(), "ext.reload", nil)
+			}
+		}
+		w.Write([]byte("reloaded"))
+	})
+
+	// Explicitly return 404 for OAuth checks so client immediately knows no auth is needed
+	mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	// Logging & security wrapper to trace requests and protect endpoints
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Defense-in-depth: reject non-allowed Origin headers on /mcp and /sse
+		if r.URL.Path == "/mcp" || r.URL.Path == "/sse" {
+			origin := r.Header.Get("Origin")
+			if !IsOriginAllowed(origin) {
+				http.Error(w, "Forbidden: Origin not allowed", http.StatusForbidden)
+				return
+			}
+		}
+
+		if r.Method == http.MethodPost {
+			bodyBytes, err := io.ReadAll(r.Body)
+			if err == nil {
+				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				if strings.Contains(string(bodyBytes), `"notifications/cancelled"`) {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	defaultPort := "3025"
 	if p := os.Getenv("PORT"); p != "" {
@@ -400,6 +447,14 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		if err := runSetup(*port); err != nil {
+			fmt.Fprintf(os.Stderr, "Setup failed: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "doctor" {
 		runDoctor(*port)
 		return
@@ -415,54 +470,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		streamableServer := server.NewStreamableHTTPServer(s,
-			server.WithStreamableHTTPCORS(),
-		)
-
-		mux := http.NewServeMux()
-		mux.Handle("/mcp", streamableServer)
-		mux.Handle("/sse", streamableServer)
-		mux.Handle("/ext", defaultExtHub)
-		mux.HandleFunc("/reload-ext", func(w http.ResponseWriter, r *http.Request) {
-			for _, p := range defaultExtHub.OnlineProfiles() {
-				if s, ok := defaultExtHub.GetSession(p); ok {
-					s.Call(r.Context(), "ext.reload", nil)
-				}
-			}
-			w.Write([]byte("reloaded"))
-		})
-
-		// Explicitly return 404 for OAuth checks so client immediately knows no auth is needed
-		mux.HandleFunc("/.well-known/", func(w http.ResponseWriter, r *http.Request) {
-			http.NotFound(w, r)
-		})
-
-		// Logging & security wrapper to trace requests and protect endpoints
-		loggingHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Defense-in-depth: reject non-allowed Origin headers on /mcp and /sse
-			if r.URL.Path == "/mcp" || r.URL.Path == "/sse" {
-				origin := r.Header.Get("Origin")
-				if !IsOriginAllowed(origin) {
-					http.Error(w, "Forbidden: Origin not allowed", http.StatusForbidden)
-					return
-				}
-			}
-
-			if r.Method == http.MethodPost {
-				bodyBytes, err := io.ReadAll(r.Body)
-				if err == nil {
-					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-					if strings.Contains(string(bodyBytes), `"notifications/cancelled"`) {
-						w.WriteHeader(http.StatusOK)
-						return
-					}
-				}
-			}
-			mux.ServeHTTP(w, r)
-		})
-
 		httpServer := &http.Server{
-			Handler: loggingHandler,
+			Handler: setupHTTPHandler(s),
 		}
 
 		var listeners []net.Listener
@@ -569,25 +578,16 @@ func runDoctor(port string) {
 	}
 
 	// 4. Chrome Extension Folder detection
-	home, _ := os.UserHomeDir()
-	extPaths := []string{
-		"/opt/homebrew/share/browseruse/extension",
-		"/opt/homebrew/opt/browseruse/share/browseruse/extension",
-		"/usr/local/share/browseruse/extension",
-		filepath.Join(home, ".1craft-browseruse", "extension"),
-		"extension",
-	}
 	foundExt := ""
-	for _, ep := range extPaths {
-		if fi, err := os.Stat(filepath.Join(ep, "manifest.json")); err == nil && !fi.IsDir() {
-			foundExt = ep
-			break
-		}
+	if hasManifest(managedExtensionDir()) {
+		foundExt = managedExtensionDir()
+	} else {
+		foundExt = findExtensionSource()
 	}
 	if foundExt != "" {
 		fmt.Printf("🟢 Chrome Extension Folder: Found at %s\n", foundExt)
 	} else {
-		fmt.Printf("🟡 Chrome Extension Folder: Not detected in standard paths\n")
+		fmt.Printf("🟡 Chrome Extension Folder: Not detected (run 'browseruse setup')\n")
 	}
 
 	fmt.Printf("\n✨ Everything looks healthy! Endpoint for AI agents: http://localhost:%s/mcp\n", port)

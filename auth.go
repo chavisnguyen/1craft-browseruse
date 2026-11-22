@@ -125,7 +125,7 @@ func IsLoopbackAddr(remoteAddr string) bool {
 }
 
 // IsOriginAllowed checks whether the HTTP Origin header is permitted.
-// If origin is empty, it returns true (cli tools like Claude Code or AGY do not send Origin).
+// If origin is empty, it returns true (cli tools like Claude Code, Codex, or AGY do not send Origin).
 // Otherwise, origin must be in BROWSERUSE_ALLOWED_ORIGINS (comma-separated).
 func IsOriginAllowed(origin string) bool {
 	if origin == "" {
