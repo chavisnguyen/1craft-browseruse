@@ -117,67 +117,44 @@ jobs:
           name: release-checksums
           path: release-assets/checksums.txt
 
-  bump-tap:
+  bump-formula:
     needs: attach
     runs-on: ubuntu-latest
     steps:
-      - name: Check TAP_TOKEN secret availability
-        id: check_token
-        env:
-          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
-        run: |
-          if [ -n "$TAP_TOKEN" ]; then
-            echo "has_token=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_token=false" >> "$GITHUB_OUTPUT"
-            echo "::warning ::TAP_TOKEN secret is not set. Skipping Homebrew tap bump."
-          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
       - uses: actions/download-artifact@v4
-        if: steps.check_token.outputs.has_token == 'true'
         with:
           name: release-checksums
           path: .
-      - name: Checkout Homebrew tap
-        if: steps.check_token.outputs.has_token == 'true'
-        uses: actions/checkout@v4
-        with:
-          repository: chavisnguyen/homebrew-browseruse
-          token: ${{ secrets.TAP_TOKEN }}
-          path: tap
       - name: Bump Formula
-        if: steps.check_token.outputs.has_token == 'true'
-        working-directory: tap
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          ARM64_SHA=$(grep "1craft-browseruse-darwin-arm64.tar.gz" ../checksums.txt | awk '{print $1}')
-          AMD64_SHA=$(grep "1craft-browseruse-darwin-amd64.tar.gz" ../checksums.txt | awk '{print $1}')
-          LINUX_SHA=$(grep "1craft-browseruse-linux-amd64.tar.gz" ../checksums.txt | awk '{print $1}')
-          
-          python3 - << PYEOF
-          import re
+          ARM64_SHA=$(grep "1craft-browseruse-darwin-arm64.tar.gz" checksums.txt | awk '{print $1}')
+          AMD64_SHA=$(grep "1craft-browseruse-darwin-amd64.tar.gz" checksums.txt | awk '{print $1}')
+          LINUX_SHA=$(grep "1craft-browseruse-linux-amd64.tar.gz" checksums.txt | awk '{print $1}')
+
+          TAG="$TAG" ARM="$ARM64_SHA" INTEL="$AMD64_SHA" LINUX="$LINUX_SHA" python3 - << 'PYEOF'
+          import os, re
 
           p = "Formula/browseruse.rb"
           s = open(p).read()
-          tag = "$TAG"
-          arm = "$ARM64_SHA"
-          intel = "$AMD64_SHA"
-          linux = "$LINUX_SHA"
-
-          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-darwin-arm64\.tar\.gz",
-                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-darwin-arm64.tar.gz", s)
-          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-darwin-amd64\.tar\.gz",
-                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-darwin-amd64.tar.gz", s)
-          s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/1craft-browseruse-linux-amd64\.tar\.gz",
-                     f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/1craft-browseruse-linux-amd64.tar.gz", s)
-
-          s = re.sub(r'(1craft-browseruse-darwin-arm64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{arm}", s)
-          s = re.sub(r'(1craft-browseruse-darwin-amd64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{intel}", s)
-          s = re.sub(r'(1craft-browseruse-linux-amd64\.tar\.gz"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{linux}", s)
-
+          tag = os.environ["TAG"]
+          sums = {
+              "darwin-arm64": os.environ["ARM"],
+              "darwin-amd64": os.environ["INTEL"],
+              "linux-amd64": os.environ["LINUX"],
+          }
+          for plat, sha in sums.items():
+              name = f"1craft-browseruse-{plat}.tar.gz"
+              s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/" + re.escape(name),
+                         f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/{name}", s)
+              s = re.sub(r'(' + re.escape(name) + r'"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{sha}", s)
           open(p, "w").write(s)
           PYEOF
-          
+
           git diff --stat
           git add Formula/browseruse.rb
           git -c "user.name=browseruse-bot" -c "user.email=browseruse-bot@users.noreply.github.com" \
-            commit -m "browseruse ${TAG}" && git push || echo "nothing to bump"
+            commit -m "chore(formula): bump to ${TAG}" && git push || echo "nothing to bump"
