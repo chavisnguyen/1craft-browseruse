@@ -65,10 +65,10 @@
     "message": "Window mode"
   },
   "windowModeDedicated": {
-    "message": "Dedicated window (recommended)"
+    "message": "Dedicated window"
   },
   "windowModeCurrent": {
-    "message": "Current window"
+    "message": "Current window (recommended)"
   },
   "windowModeHelp": {
     "message": "Dedicated window keeps automated tabs isolated from your active workspace."

@@ -80,7 +80,7 @@ func copyDir(src, dst string) error {
 }
 
 func extensionConfigJSON(token, port string) string {
-	return fmt.Sprintf("{\n  \"label\": \"default\",\n  \"token\": %q,\n  \"daemonUrl\": \"ws://127.0.0.1:%s/ext\",\n  \"windowMode\": \"dedicated\"\n}\n", token, port)
+	return fmt.Sprintf("{\n  \"label\": \"default\",\n  \"token\": %q,\n  \"daemonUrl\": \"ws://127.0.0.1:%s/ext\",\n  \"windowMode\": \"current\"\n}\n", token, port)
 }
 
 // runSetup is the one-command onboarding: token + pre-configured extension copy +

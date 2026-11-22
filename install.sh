@@ -50,7 +50,8 @@ if "$MODE" == "sse":
     }
 else:
     data["mcpServers"]["$SERVER_NAME"] = {
-        "command": "$BIN_PATH"
+        "command": "$BIN_PATH",
+        "args": ["-stdio"]
     }
 
 with open(path, "w") as f:
@@ -94,7 +95,8 @@ if "$MODE" == "sse":
 else:
     data["mcp"]["servers"]["$SERVER_NAME"] = {
         "type": "stdio",
-        "command": "$BIN_PATH"
+        "command": "$BIN_PATH",
+        "args": ["-stdio"]
     }
 
 with open(path, "w") as f:
@@ -127,7 +129,8 @@ if "$MODE" == "sse":
     }
 else:
     data["mcpServers"]["$SERVER_NAME"] = {
-        "command": "$BIN_PATH"
+        "command": "$BIN_PATH",
+        "args": ["-stdio"]
     }
 
 with open(path, "w") as f:
@@ -163,6 +166,7 @@ if "$MODE" == "sse":
 else:
     data["mcpServers"]["$SERVER_NAME"] = {
         "command": "$BIN_PATH",
+        "args": ["-stdio"],
         "disabled": False
     }
 
@@ -190,7 +194,8 @@ else:
 data.setdefault("mcpServers", {})
 data["mcpServers"].pop("$OLD_NAME", None)
 data["mcpServers"]["$SERVER_NAME"] = {
-    "command": "$BIN_PATH"
+    "command": "$BIN_PATH",
+    "args": ["-stdio"]
 }
 
 with open(path, "w") as f:
@@ -320,7 +325,7 @@ if body:
 if mode == "sse":
     new_block = f"[mcp_servers.{server_name}]\nurl = {json.dumps(sse_url)}\n"
 else:
-    new_block = f"[mcp_servers.{server_name}]\ncommand = {json.dumps(bin_path)}\n"
+    new_block = f"[mcp_servers.{server_name}]\ncommand = {json.dumps(bin_path)}\nargs = [\"-stdio\"]\n"
 
 updated = body + new_block
 

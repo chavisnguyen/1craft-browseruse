@@ -16,7 +16,7 @@ all: build
 ## setup: Tự động hoá 1-click toàn bộ cấu hình, token và chạy daemon
 setup: build
 	@TOKEN=$$($(BIN_PATH) -token); \
-	printf '{\n  "label": "default",\n  "token": "'$$TOKEN'",\n  "daemonUrl": "ws://127.0.0.1:$(PORT)/ext",\n  "windowMode": "dedicated"\n}\n' > extension/default_config.json
+	printf '{\n  "label": "default",\n  "token": "'$$TOKEN'",\n  "daemonUrl": "ws://127.0.0.1:$(PORT)/ext",\n  "windowMode": "current"\n}\n' > extension/default_config.json
 	@chmod 600 extension/default_config.json
 	@echo "🔑 Đã tự động nhúng token vào extension/default_config.json"
 	@./install.sh

@@ -78,7 +78,7 @@ Point any MCP client at `http://localhost:3025/mcp`. Codex example:
 ```bash
 codex mcp add 1craft-browseruse --url http://localhost:3025/mcp
 ```
-Or run it as a stdio server: command `browseruse` with no arguments.
+Stdio is opt-in (`browseruse -stdio`, or `make install-stdio`) for clients without HTTP support. It cannot use the Chrome extension, so prefer HTTP.
 </details>
 
 <details>
@@ -120,7 +120,7 @@ Load the extension in each profile. Labels are derived from the signed-in accoun
 <summary>How it works</summary>
 
 ```
-Agent ──MCP (HTTP/stdio)──▶ Daemon :3025 ──WebSocket──▶ Chrome extension ──▶ your tabs
+Agent ──MCP (HTTP)──▶ Daemon :3025 ──WebSocket──▶ Chrome extension ──▶ your tabs
 ```
 Backend priority: **1.** Extension (recommended) → **2.** Existing Chrome via CDP (needs Full Disk Access on macOS) → **3.** Chrome on port 9222 (`make chrome`) → **4.** Headless Chrome (no cookies).
 </details>

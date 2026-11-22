@@ -424,7 +424,8 @@ func main() {
 	}
 	defaultHost := os.Getenv("HOST")
 
-	sseMode := flag.Bool("sse", false, "Run in HTTP/SSE Server daemon mode (default is stdio)")
+	_ = flag.Bool("sse", false, "Run as HTTP daemon (default; kept for backward compatibility)")
+	stdioMode := flag.Bool("stdio", false, "Run as a stdio MCP server instead of the HTTP daemon (no browser extension support)")
 	port := flag.String("port", defaultPort, "Port to bind HTTP/SSE server (e.g. 3025)")
 	host := flag.String("host", defaultHost, "Specific host to bind (default empty: binds dual-stack loopback 127.0.0.1 and [::1])")
 	tokenFlag := flag.Bool("token", false, "Print auth token for Chrome extension and exit")
@@ -478,7 +479,7 @@ func main() {
 
 	s := setupMCPServer()
 
-	if *sseMode {
+	if !*stdioMode {
 		// Fatal check: auth token is required for extension hub /ext endpoint
 		tok, err := GetOrCreateToken()
 		if err != nil || tok == "" {
@@ -626,9 +627,11 @@ Commands:
 Common tasks:
   brew services start browseruse     Start the background daemon
   browseruse -token                  Print the auth token
-  browseruse -sse -port 3025         Run the daemon in the foreground
+  browseruse                         Run the daemon in the foreground (same as -port 3025)
+  browseruse -stdio                  Stdio MCP server (for clients without HTTP support;
+                                     cannot use the Chrome extension)
 
-Running with no command starts the MCP server in stdio mode (used by agents).
+Running with no command starts the HTTP daemon at http://localhost:3025/mcp.
 
 Flags:
 `, Version)

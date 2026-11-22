@@ -65,10 +65,10 @@
     "message": "Chế độ cửa sổ"
   },
   "windowModeDedicated": {
-    "message": "Cửa sổ riêng (Khuyên dùng)"
+    "message": "Cửa sổ riêng"
   },
   "windowModeCurrent": {
-    "message": "Cửa sổ hiện tại"
+    "message": "Cửa sổ hiện tại (Khuyên dùng)"
   },
   "windowModeHelp": {
     "message": "Mở tab trong cửa sổ riêng để không ảnh hưởng thao tác chuột của bạn."

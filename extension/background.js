@@ -66,7 +66,7 @@ async function getConfig() {
   let label = (data.label || '').trim();
   let token = (data.token || '').trim();
   let daemonUrl = (data.daemonUrl || 'ws://127.0.0.1:3025/ext').trim();
-  let windowMode = data.windowMode || 'dedicated';
+  let windowMode = data.windowMode || 'current';
 
   if (!token) {
     try {
