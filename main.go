@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	Version       = "2.0.1"
+	Version       = "3.0.0"
 	defaultExtHub = NewExtHub(30 * time.Second)
 	defaultRouter = NewRouter(defaultExtHub)
 )

@@ -23,7 +23,7 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           VERSION="${TAG#v}"
           echo "Validating version consistency for $VERSION ($TAG)..."
-          grep -F "Version          = \"${VERSION}\"" main.go
+          grep -E "Version[[:space:]]+= \"${VERSION}\"" main.go
           grep -F "\"version\": \"${VERSION}\"" extension/manifest.json
       - name: Setup Go
         uses: actions/setup-go@v5
