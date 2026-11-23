@@ -13,67 +13,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Force hermetic tests: headless isolated browser, do not attach to user's daily Chrome
-	_ = os.Setenv("CHROME_CDP_URL", "none")
-	_ = os.Setenv("BROWSER_HEADLESS", "true")
 	code := m.Run()
 	defaultRouter.CloseAll(context.Background())
 	os.Exit(code)
-}
-
-func TestExtractElementsJS(t *testing.T) {
-	if !strings.Contains(jsExtractElements, "querySelectorAll") {
-		t.Fatalf("expected jsExtractElements to contain querySelectorAll")
-	}
-}
-
-func TestCDPOpenCheck(t *testing.T) {
-	isOpen := defaultRodDriver.isCDPOpen("http://127.0.0.1:9222")
-	t.Logf("CDP port 9222 open: %v", isOpen)
-}
-
-func TestBrowserMultiTab(t *testing.T) {
-	os.Setenv("BROWSER_HEADLESS", "true")
-	defer os.Unsetenv("BROWSER_HEADLESS")
-
-	ctx := context.Background()
-	router := NewRouter(defaultRodDriver, nil)
-
-	// 1. Create first tab
-	tabID1, summary1, err := router.NewTab(ctx, "https://example.com", "")
-	if err != nil {
-		t.Fatalf("Failed to open tab 1: %v", err)
-	}
-	defer router.CloseAll(ctx)
-
-	if tabID1 != "tab-1" {
-		t.Errorf("expected tabID 'tab-1', got '%s'", tabID1)
-	}
-
-	summaryStr1 := formatPageSummary(tabID1, summary1)
-	if !strings.Contains(summaryStr1, "Example Domain") {
-		t.Errorf("expected summary to contain 'Example Domain'")
-	}
-
-	// 2. Create second tab concurrently
-	tabID2, _, err := router.NewTab(ctx, "https://example.org", "")
-	if err != nil {
-		t.Fatalf("Failed to open tab 2: %v", err)
-	}
-
-	if tabID2 != "tab-2" {
-		t.Errorf("expected tabID 'tab-2', got '%s'", tabID2)
-	}
-
-	tabs, _ := router.ListTabs(ctx)
-	if len(tabs) < 2 {
-		t.Errorf("expected at least 2 open tabs, got %d", len(tabs))
-	}
-
-	// 3. Close tab 2
-	if _, err := router.CloseTab(ctx, tabID2); err != nil {
-		t.Errorf("failed to close tab 2: %v", err)
-	}
 }
 
 func postMCP(t *testing.T, handler http.Handler, path string, sessionID string, payload map[string]any) *httptest.ResponseRecorder {
@@ -147,8 +89,8 @@ func TestMCPStreamableHTTP_CodexFlow(t *testing.T) {
 		t.Fatalf("expected initialize result object, got %#v", initJSON)
 	}
 	serverInfo, _ := result["serverInfo"].(map[string]any)
-	if serverInfo["name"] != "1craft-browseruse" {
-		t.Errorf("expected serverInfo.name '1craft-browseruse', got %v", serverInfo["name"])
+	if serverInfo["name"] != "klik" {
+		t.Errorf("expected serverInfo.name 'klik', got %v", serverInfo["name"])
 	}
 
 	// 2. notifications/initialized
@@ -160,7 +102,7 @@ func TestMCPStreamableHTTP_CodexFlow(t *testing.T) {
 		t.Fatalf("notifications/initialized expected 200/202, got %d: %s", notifRec.Code, notifRec.Body.String())
 	}
 
-	// 3. tools/list — verify all 14 tools and OpenAI/Codex-compatible object schemas
+	// 3. tools/list — verify all 17 tools and OpenAI/Codex-compatible object schemas
 	listRec := postMCP(t, handler, "/mcp", sessionID, map[string]any{
 		"jsonrpc": "2.0",
 		"id":      2,
@@ -173,8 +115,8 @@ func TestMCPStreamableHTTP_CodexFlow(t *testing.T) {
 	listJSON := decodeMCPResponse(t, listRec)
 	listResult := listJSON["result"].(map[string]any)
 	tools := listResult["tools"].([]any)
-	if len(tools) != 14 {
-		t.Fatalf("expected 14 tools, got %d", len(tools))
+	if len(tools) != 17 {
+		t.Fatalf("expected 17 tools, got %d", len(tools))
 	}
 	for _, item := range tools {
 		tool := item.(map[string]any)
@@ -193,7 +135,7 @@ func TestMCPStreamableHTTP_CodexFlow(t *testing.T) {
 		"id":      3,
 		"method":  "tools/call",
 		"params": map[string]any{
-			"name":      "get_browser_status",
+			"name":      "tabs_context_mcp",
 			"arguments": map[string]any{},
 		},
 	})

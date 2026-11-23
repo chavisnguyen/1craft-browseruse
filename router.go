@@ -3,9 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,17 +20,13 @@ type tabRef struct {
 type Router struct {
 	mu          sync.Mutex
 	tabs        map[string]tabRef
-	activeTab   string
-	counter     int
-	rod         *RodDriver
 	hub         *ExtHub
 	lastCleanup time.Time
 }
 
-func NewRouter(rod *RodDriver, hub *ExtHub) *Router {
+func NewRouter(hub *ExtHub) *Router {
 	r := &Router{
 		tabs: make(map[string]tabRef),
-		rod:  rod,
 		hub:  hub,
 	}
 	if hub != nil {
@@ -59,124 +54,93 @@ func (r *Router) selectDriverLocked(profile string) (Driver, string, error) {
 	}
 	switch len(online) {
 	case 0:
-		// Fallback to rod backend
-		return r.rod, "", nil
+		return nil, "", fmt.Errorf("no browser extension is online. Install the klik Chrome extension (run 'klik setup') and open Chrome")
 	case 1:
 		return NewExtDriver(online[0], r.hub), online[0], nil
 	default:
-		return nil, "", fmt.Errorf("multiple extension profiles online (%s). Please specify 'profile' in 'browser_new_tab'", strings.Join(online, ", "))
+		return nil, "", fmt.Errorf("multiple extension profiles online (%s). Please specify 'profile' (in tabs_context_mcp or tabs_create_mcp)", strings.Join(online, ", "))
 	}
 }
 
-func (r *Router) NewTab(ctx context.Context, url string, profile string) (string, PageSummary, error) {
+// registerTabLocked remembers which driver/profile owns a Chrome tab id.
+func (r *Router) registerTabLocked(tabID string, driver Driver, profile string) tabRef {
+	ref := tabRef{tabID: tabID, driver: driver, handle: tabID, profile: profile}
+	r.tabs[tabID] = ref
+	return ref
+}
+
+// TabsContext implements tabs_context_mcp: returns (and optionally creates) the MCP tab group.
+func (r *Router) TabsContext(ctx context.Context, profile string, createIfEmpty bool) (TabsContext, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	driver, selectedProfile, err := r.selectDriverLocked(profile)
 	if err != nil {
-		return "", PageSummary{}, err
+		return TabsContext{}, err
 	}
-
-	handle, err := driver.NewTab(ctx, url)
+	tc, err := driver.TabsContext(ctx, createIfEmpty)
 	if err != nil {
-		return "", PageSummary{}, err
+		return TabsContext{}, err
 	}
+	for _, t := range tc.Tabs {
+		r.registerTabLocked(strconv.Itoa(t.TabID), driver, selectedProfile)
+	}
+	return tc, nil
+}
 
-	r.counter++
-	tabID := fmt.Sprintf("tab-%d", r.counter)
+// NewTab implements tabs_create_mcp: creates an empty tab inside the MCP tab group.
+func (r *Router) NewTab(ctx context.Context, profile string) (string, TabsContext, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	summary, err := driver.Snapshot(ctx, handle)
+	driver, selectedProfile, err := r.selectDriverLocked(profile)
 	if err != nil {
-		// Even if initial snapshot fails, tab was created
-		summary = PageSummary{URL: url, Title: "New Tab"}
+		return "", TabsContext{}, err
 	}
-
-	ref := tabRef{
-		tabID:   tabID,
-		driver:  driver,
-		handle:  handle,
-		profile: selectedProfile,
+	handle, err := driver.NewTab(ctx)
+	if err != nil {
+		return "", TabsContext{}, err
 	}
+	r.registerTabLocked(handle, driver, selectedProfile)
 
-	r.tabs[tabID] = ref
-	r.activeTab = tabID
-
-	return tabID, summary, nil
+	tc, err := driver.TabsContext(ctx, false)
+	if err != nil {
+		return handle, TabsContext{}, nil
+	}
+	return handle, tc, nil
 }
 
 func (r *Router) cleanupDeadTabsLocked(ctx context.Context) {
 	for id, ref := range r.tabs {
 		if !ref.driver.CheckAlive(ctx, ref.handle) {
 			delete(r.tabs, id)
-			if r.activeTab == id {
-				r.activeTab = ""
-			}
 		}
 	}
 }
 
-// getTabRefLocked returns tabRef for tabID or active tab without locking.
-// If the targeted tab was closed externally, it prunes it and handles auto-recovery.
+// getTabRefLocked resolves a Chrome tab id (as a decimal string) to its owning driver.
+// Unknown ids are looked up on every online extension profile.
 func (r *Router) getTabRefLocked(ctx context.Context, tabID string) (tabRef, error) {
-	// 1. Explicit tabID provided
-	if tabID != "" {
-		ref, ok := r.tabs[tabID]
-		if ok {
-			if ref.driver.CheckAlive(ctx, ref.handle) {
-				return ref, nil
-			}
-			// Tab was closed externally
-			delete(r.tabs, tabID)
-			if r.activeTab == tabID {
-				r.activeTab = ""
+	if tabID == "" {
+		return tabRef{}, fmt.Errorf("tabId is required. Call tabs_context_mcp first to get valid tab IDs")
+	}
+	if ref, ok := r.tabs[tabID]; ok {
+		if ref.driver.CheckAlive(ctx, ref.handle) {
+			return ref, nil
+		}
+		delete(r.tabs, tabID)
+	}
+	if r.hub != nil {
+		profiles := r.hub.OnlineProfiles()
+		sort.Strings(profiles)
+		for _, profile := range profiles {
+			driver := NewExtDriver(profile, r.hub)
+			if driver.CheckAlive(ctx, tabID) {
+				return r.registerTabLocked(tabID, driver, profile), nil
 			}
 		}
-		return tabRef{}, fmt.Errorf("tab '%s' not found or was closed. Call 'browser_list_tabs' or 'browser_new_tab'", tabID)
 	}
-
-	// 2. Active tab
-	if r.activeTab != "" {
-		if ref, ok := r.tabs[r.activeTab]; ok {
-			if ref.driver.CheckAlive(ctx, ref.handle) {
-				return ref, nil
-			}
-			delete(r.tabs, r.activeTab)
-			r.activeTab = ""
-		}
-	}
-
-	// 3. Fallback to any existing tab that is still alive
-	if len(r.tabs) > 0 {
-		for id, ref := range r.tabs {
-			if ref.driver.CheckAlive(ctx, ref.handle) {
-				r.activeTab = id
-				return ref, nil
-			}
-			delete(r.tabs, id)
-		}
-	}
-
-	// 4. Create the first tab using profile selection rules
-	driver, selectedProfile, err := r.selectDriverLocked("")
-	if err != nil {
-		return tabRef{}, err
-	}
-	handle, err := driver.NewTab(ctx, "")
-	if err != nil {
-		return tabRef{}, err
-	}
-
-	r.counter++
-	newTabID := fmt.Sprintf("tab-%d", r.counter)
-	ref := tabRef{
-		tabID:   newTabID,
-		driver:  driver,
-		handle:  handle,
-		profile: selectedProfile,
-	}
-	r.tabs[newTabID] = ref
-	r.activeTab = newTabID
-	return ref, nil
+	return tabRef{}, fmt.Errorf("Tab %s does not exist (may have already been closed). Call tabs_context_mcp to see current tabs", tabID)
 }
 
 func (r *Router) GetTab(ctx context.Context, tabID string) (tabRef, error) {
@@ -185,419 +149,26 @@ func (r *Router) GetTab(ctx context.Context, tabID string) (tabRef, error) {
 	return r.getTabRefLocked(ctx, tabID)
 }
 
+// CloseTab implements tabs_close_mcp. The extension enforces tab-group confinement.
 func (r *Router) CloseTab(ctx context.Context, tabID string) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	targetID := tabID
-	if targetID == "" {
-		targetID = r.activeTab
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	if err != nil {
+		return tabID, err
 	}
-
-	ref, ok := r.tabs[targetID]
-	if !ok {
-		return targetID, fmt.Errorf("tab '%s' not found", targetID)
+	if err := ref.driver.CloseTab(ctx, ref.handle); err != nil {
+		return tabID, err
 	}
-
-	_ = ref.driver.CloseTab(ctx, ref.handle)
-	delete(r.tabs, targetID)
-
-	if r.activeTab == targetID {
-		r.activeTab = ""
-		for id := range r.tabs {
-			r.activeTab = id
-			break
-		}
-	}
-
-	return targetID, nil
-}
-
-func (r *Router) ListTabs(ctx context.Context) ([]TabInfo, string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.cleanupDeadTabsLocked(ctx)
-
-	var result []TabInfo
-	for id, ref := range r.tabs {
-		infos, err := ref.driver.ListTabs(ctx, []string{ref.handle})
-		if err != nil || len(infos) == 0 {
-			continue
-		}
-		info := infos[0]
-		info.ID = id
-		info.Profile = ref.profile
-		result = append(result, info)
-	}
-
-	if r.activeTab == "" && len(r.tabs) > 0 {
-		for id := range r.tabs {
-			r.activeTab = id
-			break
-		}
-	}
-
-	return result, r.activeTab
+	delete(r.tabs, tabID)
+	return tabID, nil
 }
 
 func (r *Router) CloseAll(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
-	for _, ref := range r.tabs {
-		_ = ref.driver.CloseTab(ctx, ref.handle)
-	}
 	r.tabs = make(map[string]tabRef)
-	r.activeTab = ""
-	_ = r.rod.Close()
-}
-
-func (r *Router) Navigate(ctx context.Context, tabID, url, action string) (string, string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", "", PageSummary{}, err
-	}
-
-	if err := ref.driver.Navigate(ctx, ref.handle, url, action); err != nil {
-		return ref.tabID, "", PageSummary{}, err
-	}
-
-	mode := ref.driver.Mode()
-
-	summary, err := ref.driver.ReadPage(ctx, ref.handle, "interactive")
-	if err != nil {
-		return ref.tabID, mode, PageSummary{}, err
-	}
-
-	return ref.tabID, mode, summary, nil
-}
-
-func (r *Router) ReadPage(ctx context.Context, tabID, filter string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	summary, err := ref.driver.ReadPage(ctx, ref.handle, filter)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) Computer(ctx context.Context, tabID, action string, params map[string]any) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	res, err := ref.driver.Computer(ctx, ref.handle, action, params)
-	return ref.tabID, res, err
-}
-
-func (r *Router) FormInput(ctx context.Context, tabID, refID string, value any, checked *bool) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	res, err := ref.driver.FormInput(ctx, ref.handle, refID, value, checked)
-	return ref.tabID, res, err
-}
-
-func (r *Router) Find(ctx context.Context, tabID, query string) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	res, err := ref.driver.Find(ctx, ref.handle, query)
-	return ref.tabID, res, err
-}
-
-func (r *Router) ReadNetworkRequests(ctx context.Context, tabID string, clear bool, filter string) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	res, err := ref.driver.ReadNetworkRequests(ctx, ref.handle, clear, filter)
-	return ref.tabID, res, err
-}
-
-func (r *Router) ReadConsoleMessages(ctx context.Context, tabID string, clear bool) (string, []string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	logs, err := ref.driver.ReadConsoleMessages(ctx, ref.handle, clear)
-	return ref.tabID, logs, err
-}
-
-func (r *Router) BrowserBatch(ctx context.Context, tabID string, actions []any) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	res, err := ref.driver.BrowserBatch(ctx, ref.handle, actions)
-	return ref.tabID, res, err
-}
-
-func (r *Router) Snapshot(ctx context.Context, tabID string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) Click(ctx context.Context, tabID, selector string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	if err := ref.driver.Click(ctx, ref.handle, selector); err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) Hover(ctx context.Context, tabID, selector string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	if err := ref.driver.Hover(ctx, ref.handle, selector); err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) Select(ctx context.Context, tabID, selector, value string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	if err := ref.driver.Select(ctx, ref.handle, selector, value); err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) WaitFor(ctx context.Context, tabID, selector string, timeoutMs int, state string) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.WaitFor(ctx, ref.handle, selector, timeoutMs, state); err != nil {
-		return ref.tabID, err
-	}
-	return ref.tabID, nil
-}
-
-func (r *Router) UploadFile(ctx context.Context, tabID, selector string, files []string) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.UploadFile(ctx, ref.handle, selector, files); err != nil {
-		return ref.tabID, err
-	}
-	return ref.tabID, nil
-}
-
-func (r *Router) DragAndDrop(ctx context.Context, tabID, fromSelector, toSelector string) (string, PageSummary, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", PageSummary{}, err
-	}
-
-	if err := ref.driver.DragAndDrop(ctx, ref.handle, fromSelector, toSelector); err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-
-	summary, err := ref.driver.Snapshot(ctx, ref.handle)
-	if err != nil {
-		return ref.tabID, PageSummary{}, err
-	}
-	return ref.tabID, summary, nil
-}
-
-func (r *Router) ActivateTab(ctx context.Context, tabID string) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.ActivateTab(ctx, ref.handle); err != nil {
-		return ref.tabID, err
-	}
-	return ref.tabID, nil
-}
-
-func (r *Router) ConsoleLogs(ctx context.Context, tabID string, clear bool) (string, []string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	logs, err := ref.driver.ConsoleLogs(ctx, ref.handle, clear)
-	if err != nil {
-		return ref.tabID, nil, err
-	}
-	return ref.tabID, logs, nil
-}
-
-func (r *Router) Type(ctx context.Context, tabID, selector, text string, pressEnter bool) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.Type(ctx, ref.handle, selector, text); err != nil {
-		return ref.tabID, err
-	}
-
-	if pressEnter {
-		_ = ref.driver.PressKey(ctx, ref.handle, "enter")
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	return ref.tabID, nil
-}
-
-func (r *Router) PressKey(ctx context.Context, tabID, key string) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.PressKey(ctx, ref.handle, key); err != nil {
-		return ref.tabID, err
-	}
-	return ref.tabID, nil
-}
-
-func (r *Router) Scroll(ctx context.Context, tabID, direction string, amount int) (string, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", err
-	}
-
-	if err := ref.driver.Scroll(ctx, ref.handle, direction, amount); err != nil {
-		return ref.tabID, err
-	}
-	return ref.tabID, nil
-}
-
-func (r *Router) Screenshot(ctx context.Context, tabID, filename string, annotate bool) (string, string, error) {
-	if filename == "" {
-		filename = "screenshot.png"
-	}
-	if !filepath.IsAbs(filename) && !strings.HasPrefix(filename, "/") {
-		filename = "/tmp/" + filename
-	}
-
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", "", err
-	}
-
-	data, err := ref.driver.Screenshot(ctx, ref.handle, annotate)
-	if err != nil {
-		return ref.tabID, "", fmt.Errorf("failed to take screenshot: %w", err)
-	}
-
-	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return ref.tabID, "", fmt.Errorf("failed to save screenshot: %w", err)
-	}
-
-	return ref.tabID, filename, nil
-}
-
-func (r *Router) Evaluate(ctx context.Context, tabID, script string) (string, any, error) {
-	r.mu.Lock()
-	ref, err := r.getTabRefLocked(ctx, tabID)
-	r.mu.Unlock()
-	if err != nil {
-		return "", nil, err
-	}
-
-	val, err := ref.driver.Evaluate(ctx, ref.handle, script)
-	if err != nil {
-		return ref.tabID, nil, err
-	}
-	return ref.tabID, val, nil
 }
 
 func (r *Router) onProfileDisconnected(profile string) {
@@ -607,16 +178,6 @@ func (r *Router) onProfileDisconnected(profile string) {
 	for id, ref := range r.tabs {
 		if ref.profile == profile {
 			delete(r.tabs, id)
-			if r.activeTab == id {
-				r.activeTab = ""
-			}
-		}
-	}
-
-	if r.activeTab == "" && len(r.tabs) > 0 {
-		for id := range r.tabs {
-			r.activeTab = id
-			break
 		}
 	}
 }
@@ -634,44 +195,13 @@ func (r *Router) countTabsForProfile(profile string) int {
 	return count
 }
 
-func (r *Router) GetStatus(ctx context.Context) string {
-	cdpURL := os.Getenv("CHROME_CDP_URL")
-	if cdpURL == "" {
-		cdpURL = defaultCDPURL
+// Invoke runs a page.* tool call on a tab (tabID is Chrome's numeric tab id as a string).
+func (r *Router) Invoke(ctx context.Context, tabID, method string, params map[string]any) (*ToolResponse, error) {
+	r.mu.Lock()
+	ref, err := r.getTabRefLocked(ctx, tabID)
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
-	isOpen := r.rod.isCDPOpen(cdpURL)
-
-	status := "### Browser Automation Status (Golang Multi-Agent Engine)\n"
-	if isOpen {
-		status += "- **Chrome CDP (Port 9222)**: 🟢 Connected to Google Chrome\n"
-		status += "- **Mode**: CDP Attached (Shared session & zero extra RAM)\n"
-	} else {
-		status += "- **Chrome CDP (Port 9222)**: 🔴 Not connected (Using standalone Chrome)\n"
-		status += "- **Mode**: Standalone Chrome\n"
-		status += "\n💡 **Tip**: Run `make chrome` to attach to your real Google Chrome!\n"
-	}
-
-	if r.hub != nil {
-		profiles := r.hub.ListProfiles()
-		status += fmt.Sprintf("- **Extension Profiles Online**: %d\n", len(profiles))
-		for _, p := range profiles {
-			emailInfo := ""
-			if p.Email != "" {
-				emailInfo = fmt.Sprintf(" (%s)", p.Email)
-			}
-			status += fmt.Sprintf("  * `[%s]`%s — %d tabs managed (connected %s)\n",
-				p.Profile, emailInfo, p.OpenTabs, p.ConnectedAt.Format("15:04:05"))
-		}
-	}
-
-	tabs, _ := r.ListTabs(ctx)
-	status += fmt.Sprintf("- **Open Tabs Managed**: %d\n", len(tabs))
-	for _, t := range tabs {
-		profileTag := ""
-		if t.Profile != "" {
-			profileTag = fmt.Sprintf(" [%s]", t.Profile)
-		}
-		status += fmt.Sprintf("  * `[%s]`%s %s (`%s`)\n", t.ID, profileTag, t.Title, t.URL)
-	}
-	return status
+	return ref.driver.Invoke(ctx, ref.handle, method, params)
 }

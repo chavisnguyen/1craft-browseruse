@@ -1,11 +1,11 @@
-import { generateAccessibilityTreeFn } from './lib/accessibility_tree.js';
-import { findElementInPage, findElementsQueryInPage, waitForElementInPage } from './lib/find_element.js';
-import {
-  setAgentActiveState,
-  animateCursorTo,
-  hideAgentIndicatorsForScreenshot,
-  showAgentIndicatorsAfterScreenshot,
-} from './lib/cursor.js';
+import { ToolError } from './lib/errors.js';
+import { runComputerAction, forgetTabContext, captureFrame, frameToViewport, ui } from './lib/computer.js';
+import { onDebuggerEvent, enableNetworkTracking, forgetTab, getConsoleMessages, clearConsole, getNetworkRequests, clearNetwork, formatConsole, formatNetwork } from './lib/tracker.js';
+import { handleBeforeunloadDialog, navigateTab, runJavascript, resizeWindow, fileUpload, uploadImage } from './lib/page_tools.js';
+import * as gif from './lib/gif.js';
+import { findLocal } from './lib/find_match.js';
+import { formInputInPage } from './lib/form_input.js';
+import { extractPageText } from './lib/page_text.js';
 
 let ws = null;
 let pingInterval = null;
@@ -13,12 +13,8 @@ let reconnectTimeout = null;
 let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 
-let agentWindowId = null;
 let agentGroupId = null;
-const agentTabIds = new Set();
 const attachedDebuggers = new Set();
-const consoleLogsByTab = new Map();
-const networkRequestsByTab = new Map();
 
 function generateUUID() {
   if (crypto.randomUUID) {
@@ -121,54 +117,127 @@ async function getConfig() {
   };
 }
 
-async function getOrCreateWindow(windowMode) {
-  if (windowMode !== 'dedicated') {
-    return undefined;
-  }
+// ---------------------------------------------------------------------------
+// MCP tab group (mirrors Claude in Chrome's TabGroupManager.getOrCreateMcpTabContext)
+// Tools may only act on tabs inside this group. The group id survives service
+// worker restarts because it is looked up again by title.
+// ---------------------------------------------------------------------------
+const MCP_GROUP_TITLE = 'klik';
+const NO_GROUP_NOTE =
+  'Any tabs opened earlier in this conversation may still be open in Chrome, outside any group these tools can see or control.';
 
-  if (agentWindowId !== null) {
+// The MCP group is whatever Chrome tab group carries our title (and still has tabs). Nothing is
+// persisted: the service worker can restart or the extension reload and we simply look it up again.
+async function loadMcpGroupId() {
+  if (agentGroupId !== null) {
     try {
-      const win = await chrome.windows.get(agentWindowId);
-      if (win) return win.id;
+      await chrome.tabGroups.get(agentGroupId);
+      return agentGroupId;
     } catch {
-      agentWindowId = null;
+      agentGroupId = null;
     }
   }
-
-  const win = await chrome.windows.create({
-    focused: false,
-    width: 1280,
-    height: 900,
-  });
-  agentWindowId = win.id;
-  return agentWindowId;
-}
-
-// Manages Chrome Tab Groups for agent tabs
-async function ensureAgentTabGroup(tabId) {
-  if (!chrome.tabGroups) return null;
   try {
-    if (agentGroupId !== null) {
-      try {
-        const grp = await chrome.tabGroups.get(agentGroupId);
-        if (grp) {
-          await chrome.tabs.group({ tabIds: [tabId], groupId: agentGroupId });
-          return agentGroupId;
-        }
-      } catch {
-        agentGroupId = null;
+    const groups = await chrome.tabGroups.query({ title: MCP_GROUP_TITLE });
+    for (const group of groups) {
+      const tabs = await chrome.tabs.query({ groupId: group.id });
+      if (tabs.length > 0) {
+        agentGroupId = group.id;
+        break;
       }
     }
+  } catch {}
+  return agentGroupId;
+}
 
-    agentGroupId = await chrome.tabs.group({ tabIds: [tabId] });
-    await chrome.tabGroups.update(agentGroupId, {
-      title: 'OneCraft Agent',
-      color: 'orange',
+function toTabSummary(t) {
+  return { tabId: t.id, title: t.title || '', url: t.url || '' };
+}
+
+async function listGroupTabs(groupId) {
+  const tabs = await chrome.tabs.query({ groupId });
+  return tabs.filter((t) => t.id !== undefined).map(toTabSummary);
+}
+
+// Returns { tabGroupId, availableTabs } or null when no group exists (and createIfEmpty is false).
+async function getOrCreateMcpTabContext({ createIfEmpty = false } = {}) {
+  await loadMcpGroupId();
+  if (agentGroupId !== null) {
+    try {
+      await chrome.tabGroups.get(agentGroupId);
+      const availableTabs = await listGroupTabs(agentGroupId);
+      if (availableTabs.length > 0) {
+        return { tabGroupId: agentGroupId, availableTabs };
+      }
+    } catch {
+      // group is gone
+    }
+    agentGroupId = null;
+  }
+  if (!createIfEmpty) return null;
+
+  const config = await getConfig();
+  let tabId;
+  if (config.windowMode !== 'dedicated') {
+    try {
+      const win = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+      const tab = await chrome.tabs.create({ windowId: win.id, url: 'chrome://newtab/', active: false });
+      tabId = tab.id;
+    } catch {
+      tabId = undefined;
+    }
+  }
+  if (tabId === undefined) {
+    const win = await chrome.windows.create({
+      url: 'chrome://newtab/',
+      focused: false,
+      type: 'normal',
+      width: 1280,
+      height: 900,
     });
-    return agentGroupId;
-  } catch (err) {
-    console.warn('Tab group creation error:', err);
-    return null;
+    tabId = win && win.tabs && win.tabs[0] && win.tabs[0].id;
+  }
+  if (tabId === undefined) throw new ToolError('tab_create_exception', 'Failed to create a tab for the MCP tab group');
+
+  agentGroupId = await chrome.tabs.group({ tabIds: [tabId] });
+  await chrome.tabGroups.update(agentGroupId, { title: MCP_GROUP_TITLE, color: 'orange' });
+  const tab = await chrome.tabs.get(tabId);
+  return { tabGroupId: agentGroupId, availableTabs: [toTabSummary(tab)] };
+}
+
+// Throws unless tabId belongs to the MCP tab group.
+async function assertTabInMcpGroup(tabId) {
+  await loadMcpGroupId();
+  const notInGroup = () =>
+    new ToolError(
+      'tab_outside_group',
+      `Tab ${tabId} is not in Claude's tab group for this session. Tools can only target tabs inside the group. Call tabs_context_mcp to list valid tabs (or create the group with createIfEmpty: true), or tabs_create_mcp to add a tab.`
+    );
+  if (agentGroupId === null) throw notInGroup();
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    throw new ToolError('tab_not_found', `Tab ${tabId} does not exist (may have already been closed). Call tabs_context_mcp to see current tabs.`);
+  }
+  if (tab.groupId !== agentGroupId) throw notInGroup();
+  return tab;
+}
+
+async function buildTabContext(currentTabId) {
+  await loadMcpGroupId();
+  if (agentGroupId === null) return undefined;
+  try {
+    const availableTabs = await listGroupTabs(agentGroupId);
+    return {
+      currentTabId,
+      executedOnTabId: currentTabId,
+      availableTabs,
+      tabCount: availableTabs.length,
+      tabGroupId: agentGroupId,
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -183,7 +252,8 @@ async function ensureDebuggerAttached(tabId) {
     try {
       await chrome.debugger.sendCommand({ tabId }, 'Runtime.enable');
       await chrome.debugger.sendCommand({ tabId }, 'Page.enable');
-      await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
+      // Background tabs must behave as focused so input events and screenshots work.
+      await chrome.debugger.sendCommand({ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: true });
     } catch {}
     return true;
   } catch (err) {
@@ -192,66 +262,23 @@ async function ensureDebuggerAttached(tabId) {
   }
 }
 
+const rawSend = (tabId, method, params) => chrome.debugger.sendCommand({ tabId }, method, params);
+
 chrome.debugger.onEvent.addListener(async (source, method, params) => {
   if (!source || !source.tabId) return;
   const tabId = source.tabId;
-  const timeStr = new Date().toLocaleTimeString();
 
-  // 1. Prevent CDP hang on window.alert / confirm / prompt
+  // Dialogs must be answered or the page hangs: "Leave site?" follows the navigate `force` policy,
+  // alert/confirm/prompt are accepted.
   if (method === 'Page.javascriptDialogOpening') {
+    if (await handleBeforeunloadDialog(tabId, params, rawSend)) return;
     try {
-      await chrome.debugger.sendCommand({ tabId }, 'Page.handleJavaScriptDialog', {
-        accept: true,
-        promptText: '',
-      });
+      await rawSend(tabId, 'Page.handleJavaScriptDialog', { accept: true, promptText: '' });
     } catch {}
     return;
   }
 
-  // 2. Capture Console logs
-  if (method === 'Runtime.consoleAPICalled') {
-    if (!consoleLogsByTab.has(tabId)) consoleLogsByTab.set(tabId, []);
-    const logs = consoleLogsByTab.get(tabId);
-    const type = params.type || 'log';
-    const text = (params.args || [])
-      .map((a) => (a.value !== undefined ? String(a.value) : (a.description || '')))
-      .join(' ');
-    logs.push(`[${timeStr}] [${type}] ${text}`);
-    if (logs.length > 500) logs.shift();
-  } else if (method === 'Runtime.exceptionThrown') {
-    if (!consoleLogsByTab.has(tabId)) consoleLogsByTab.set(tabId, []);
-    const logs = consoleLogsByTab.get(tabId);
-    const desc = params.exceptionDetails
-      ? (params.exceptionDetails.exception ? params.exceptionDetails.exception.description : params.exceptionDetails.text)
-      : 'Unknown exception';
-    logs.push(`[${timeStr}] [error] ${desc}`);
-    if (logs.length > 500) logs.shift();
-  }
-
-  // 3. Capture Network requests and responses
-  if (method === 'Network.requestWillBeSent') {
-    if (!networkRequestsByTab.has(tabId)) networkRequestsByTab.set(tabId, []);
-    const reqs = networkRequestsByTab.get(tabId);
-    reqs.push({
-      requestId: params.requestId,
-      url: params.request.url,
-      method: params.request.method,
-      type: params.type || 'Other',
-      timestamp: Date.now(),
-      status: null,
-      mimeType: null,
-    });
-    if (reqs.length > 200) reqs.shift();
-  } else if (method === 'Network.responseReceived') {
-    const reqs = networkRequestsByTab.get(tabId);
-    if (reqs) {
-      const match = reqs.find((r) => r.requestId === params.requestId);
-      if (match) {
-        match.status = params.response.status;
-        match.mimeType = params.response.mimeType;
-      }
-    }
-  }
+  onDebuggerEvent(tabId, method, params);
 });
 
 chrome.debugger.onDetach.addListener((source) => {
@@ -261,20 +288,13 @@ chrome.debugger.onDetach.addListener((source) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  agentTabIds.delete(tabId);
-  consoleLogsByTab.delete(tabId);
-  networkRequestsByTab.delete(tabId);
+  forgetTab(tabId);
+  forgetTabContext(tabId);
   if (attachedDebuggers.has(tabId)) {
     try {
       chrome.debugger.detach({ tabId });
     } catch {}
     attachedDebuggers.delete(tabId);
-  }
-});
-
-chrome.windows.onRemoved.addListener((windowId) => {
-  if (agentWindowId === windowId) {
-    agentWindowId = null;
   }
 });
 
@@ -309,344 +329,222 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function getKeyDetails(keyStr) {
-  switch ((keyStr || '').toLowerCase()) {
-    case 'enter':
-      return { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' };
-    case 'tab':
-      return { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 };
-    case 'escape':
-    case 'esc':
-      return { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 };
-    case 'backspace':
-      return { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 };
-    case 'arrowdown':
-    case 'down':
-      return { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
-    case 'arrowup':
-    case 'up':
-      return { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 };
-    case 'arrowleft':
-    case 'left':
-      return { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 };
-    case 'arrowright':
-    case 'right':
-      return { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 };
+async function injectPageTree(tabId) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['lib/page_tree.js'], injectImmediately: true });
+}
+
+// ---- GIF recording -------------------------------------------------------
+function pickActionInfo(params) {
+  const info = {};
+  for (const k of ['coordinate', 'start_coordinate', 'text', 'scroll_direction', 'ref']) if (params[k] !== undefined) info[k] = params[k];
+  return info;
+}
+
+async function recordGifFrame(tabId, action, screenshotResult) {
+  if (!gif.isRecording()) return;
+  try {
+    const shot = screenshotResult
+      ? {
+          base64: screenshotResult.base64Image,
+          imageWidth: screenshotResult.imageWidth,
+          imageHeight: screenshotResult.imageHeight,
+          frameWidth: screenshotResult.frameWidth,
+          frameHeight: screenshotResult.frameHeight,
+        }
+      : await captureFrame(tabId, computerDeps);
+    gif.addFrame({ ...shot, action });
+  } catch {
+    // a missed frame must never fail the action itself
+  }
+}
+
+function dropFileInPage(base64, name, x, y, shownX, shownY) {
+  const bin = atob(base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const file = new File([new Blob([arr], { type: 'image/gif' })], name, { type: 'image/gif', lastModified: Date.now() });
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  const el = document.elementFromPoint(x, y);
+  if (!el) throw new Error(`No element found at coordinates (${shownX}, ${shownY})`);
+  for (const type of ['dragenter', 'dragover', 'drop']) {
+    el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt, clientX: x, clientY: y }));
+  }
+  return { output: `Successfully dropped ${name} (${Math.round(file.size / 1024)}KB) at (${shownX}, ${shownY})` };
+}
+
+async function gifAction(params) {
+  switch (params.action) {
+    case 'start_recording':
+      return gif.startRecording();
+    case 'stop_recording':
+      return gif.stopRecording();
+    case 'clear':
+      return gif.clearAction();
+    case 'export': {
+      const download = params.download === true;
+      const coordinate = Array.isArray(params.coordinate) && params.coordinate.length === 2 ? params.coordinate : null;
+      if (!download && !coordinate) {
+        throw new Error('coordinate parameter is required for export action (or set download: true to download the GIF)');
+      }
+      if (gif.frameCount() === 0) {
+        throw new ToolError('gif_no_frames', "No frames recorded for this tab group. Use 'start_recording' and perform browser actions first.");
+      }
+      const built = await gif.buildGif(params.options || {});
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = params.filename || `recording-${stamp}.gif`;
+      let output;
+      let downloadNote = '';
+      if (download) {
+        const downloadId = await chrome.downloads.download({ url: `data:image/gif;base64,${built.base64}`, filename, saveAs: false });
+        // wait (briefly) for Chrome to finish or reject the download
+        for (let waited = 0; waited < 5000; waited += 250) {
+          const [item] = await chrome.downloads.search({ id: downloadId });
+          if (item && item.state === 'interrupted') throw new Error(`Chrome could not save the GIF (${item.error || 'download interrupted'})`);
+          if (item && item.state === 'complete') break;
+          if (waited >= 4750 && item) downloadNote = ` [download state: ${item.state}, danger: ${item.danger}, paused: ${item.paused}, bytes: ${item.bytesReceived}/${item.totalBytes}]`;
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        output = `Successfully exported GIF with ${built.frames} frames. Downloaded "${filename}" (${Math.round(built.size / 1024)}KB). Dimensions: ${built.width}x${built.height}. Recording cleared.${downloadNote}`;
+      } else {
+        const [vx, vy] = frameToViewport(params.tabId, coordinate, 'gif_creator export');
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: params.tabId },
+          func: dropFileInPage,
+          args: [built.base64, filename, vx, vy, Math.round(coordinate[0]), Math.round(coordinate[1])],
+        });
+        if (!results || !results[0] || !results[0].result) throw new Error('Failed to upload GIF to page');
+        output = `Successfully exported GIF with ${built.frames} frames. ${results[0].result.output}. Dimensions: ${built.width}x${built.height}. Recording cleared.`;
+      }
+      gif.clearFrames();
+      return { output };
+    }
     default:
-      return { key: keyStr || 'Enter', code: keyStr || 'Enter', windowsVirtualKeyCode: 13, text: keyStr ? keyStr : '\r' };
+      throw new Error(`Unknown action: ${params.action}. Must be one of: start_recording, stop_recording, export, clear`);
   }
 }
 
-// Single Computer Action Dispatcher
-async function dispatchComputerAction(tabId, params) {
-  const action = (params.action || 'left_click').toLowerCase();
-  const selector = params.selector || '';
-  const coordinate = params.coordinate || null;
-
-  let x = coordinate && coordinate[0] !== undefined ? coordinate[0] : null;
-  let y = coordinate && coordinate[1] !== undefined ? coordinate[1] : null;
-
-  // Resolve target coordinates if selector provided
-  let findRes = null;
-  if (selector && (x === null || y === null)) {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: findElementInPage,
-      args: [selector, 'prepare_click', ''],
-    });
-    findRes = results && results[0] ? results[0].result : null;
-    if (!findRes || !findRes.found) {
-      throw new Error((findRes && findRes.error) || `element not found: no element matching '${selector}'`);
+// A hidden (background) tab renders no frames, and Chrome only acknowledges a mouse event once a
+// frame is produced. Send the event, and if it is not acknowledged quickly force one frame by
+// taking a tiny screenshot, then wait for the acknowledgement (bounded, so a stuck page cannot
+// hang the tool for the full RPC timeout).
+async function sendMouseEvent(tabId, params) {
+  const call = chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', params);
+  let acked = false;
+  const tracked = call.then(
+    () => {
+      acked = true;
+    },
+    (err) => {
+      acked = true;
+      throw err;
     }
-    x = findRes.center.x;
-    y = findRes.center.y;
+  );
+  tracked.catch(() => {});
+  await Promise.race([tracked.catch(() => {}), sleep(60)]);
+  if (!acked) {
+    chrome.debugger
+      .sendCommand({ tabId }, 'Page.captureScreenshot', { format: 'jpeg', quality: 1, captureBeyondViewport: false, fromSurface: true })
+      .catch(() => {});
+    await Promise.race([tracked.catch(() => {}), sleep(3000)]);
   }
-
-  // 1. Mouse move / hover
-  if (action === 'mouse_move' || action === 'hover') {
-    if (x !== null && y !== null) {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: animateCursorTo,
-        args: [x, y, false, `Hovering ${selector || ''}`.trim()],
-      }).catch(() => {});
-
-      const hasDebugger = await ensureDebuggerAttached(tabId);
-      if (hasDebugger) {
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-          type: 'mouseMoved',
-          x,
-          y,
-        }).catch(() => {});
-      }
-    }
-    return { action, hovered: true, coordinate: [x, y] };
-  }
-
-  // 2. Mouse clicks (left, right, middle, double, triple)
-  if (
-    action === 'left_click' ||
-    action === 'click' ||
-    action === 'right_click' ||
-    action === 'middle_click' ||
-    action === 'double_click' ||
-    action === 'triple_click'
-  ) {
-    const button = (action === 'right_click') ? 'right' : (action === 'middle_click') ? 'middle' : 'left';
-    const clickCount = (action === 'double_click') ? 2 : (action === 'triple_click') ? 3 : 1;
-
-    if (x !== null && y !== null) {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: animateCursorTo,
-        args: [x, y, true, `Clicking ${selector || ''}`.trim()],
-      }).catch(() => {});
-
-      const hasDebugger = await ensureDebuggerAttached(tabId);
-      if (hasDebugger) {
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-          type: 'mouseMoved',
-          x,
-          y,
-        }).catch(() => {});
-
-        for (let i = 1; i <= clickCount; i++) {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-            type: 'mousePressed',
-            x,
-            y,
-            button,
-            clickCount: i,
-          }).catch(() => {});
-          await sleep(25);
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-            type: 'mouseReleased',
-            x,
-            y,
-            button,
-            clickCount: i,
-          }).catch(() => {});
-          if (i < clickCount) await sleep(60);
-        }
-      }
-
-      // Hybrid Universal Click Guarantee for left click
-      if (button === 'left' && selector) {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          func: findElementInPage,
-          args: [selector, 'ensure_click', ''],
-        }).catch(() => {});
-      }
-    }
-    await sleep(150);
-    return { action, clicked: true, button, clickCount, coordinate: [x, y] };
-  }
-
-  // 3. Typing text
-  if (action === 'type') {
-    const text = params.text || '';
-    if (selector) {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: findElementInPage,
-        args: [selector, 'prepare_type', ''],
-      });
-      if (findRes && findRes.center) {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          func: animateCursorTo,
-          args: [findRes.center.x, findRes.center.y, false, `Typing into ${selector}`],
-        }).catch(() => {});
-      }
-    }
-
-    const hasDebugger = await ensureDebuggerAttached(tabId);
-    let typed = false;
-    if (hasDebugger) {
-      try {
-        await chrome.debugger.sendCommand({ tabId }, 'Input.insertText', { text });
-        typed = true;
-      } catch {}
-    }
-    if (!typed && selector) {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: findElementInPage,
-        args: [selector, 'type_fallback', text],
-      });
-    }
-    return { action, typed: true, text };
-  }
-
-  // 4. Key press
-  if (action === 'key' || action === 'press_key') {
-    const key = params.key || 'Enter';
-    const kd = getKeyDetails(key);
-    const hasDebugger = await ensureDebuggerAttached(tabId);
-    let pressed = false;
-
-    if (hasDebugger) {
-      try {
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-          type: 'rawKeyDown',
-          key: kd.key,
-          code: kd.code,
-          windowsVirtualKeyCode: kd.windowsVirtualKeyCode,
-        });
-        if (kd.text) {
-          await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-            type: 'char',
-            text: kd.text,
-          });
-        }
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchKeyEvent', {
-          type: 'keyUp',
-          key: kd.key,
-          code: kd.code,
-          windowsVirtualKeyCode: kd.windowsVirtualKeyCode,
-        });
-        pressed = true;
-      } catch {}
-    }
-
-    if (!pressed) {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: (kName, kCode) => {
-          const target = document.activeElement || document.body;
-          target.dispatchEvent(new KeyboardEvent('keydown', { key: kName, code: kCode, keyCode: 13, which: 13, bubbles: true }));
-          target.dispatchEvent(new KeyboardEvent('keyup', { key: kName, code: kCode, keyCode: 13, which: 13, bubbles: true }));
-          if (kName === 'Enter' && target && target.form) {
-            if (target.form.requestSubmit) target.form.requestSubmit();
-            else target.form.submit();
-          }
-        },
-        args: [kd.key, kd.code],
-      });
-    }
-    return { action, pressed: true, key };
-  }
-
-  // 5. Scroll
-  if (action === 'scroll') {
-    const direction = (params.direction || 'down').toLowerCase();
-    const amount = params.amount > 0 ? params.amount : 500;
-
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (dir, amt) => {
-        if (dir === 'up') window.scrollBy({ top: -amt, behavior: 'instant' });
-        else if (dir === 'top') window.scrollTo({ top: 0, behavior: 'instant' });
-        else if (dir === 'bottom') window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
-        else window.scrollBy({ top: amt, behavior: 'instant' });
-      },
-      args: [direction, amount],
-    });
-    await sleep(200);
-    return { action, scrolled: true, direction, amount };
-  }
-
-  // 6. Drag and Drop
-  if (action === 'drag' || action === 'drag_and_drop') {
-    const fromSel = params.from || selector;
-    const toSel = params.to;
-    if (!fromSel || !toSel) throw new Error('drag requires both "from" and "to" selectors');
-
-    const fromRes = (await chrome.scripting.executeScript({ target: { tabId }, func: findElementInPage, args: [fromSel, 'find', ''] }))[0].result;
-    const toRes = (await chrome.scripting.executeScript({ target: { tabId }, func: findElementInPage, args: [toSel, 'find', ''] }))[0].result;
-    if (!fromRes || !fromRes.found) throw new Error(`Source element not found: '${fromSel}'`);
-    if (!toRes || !toRes.found) throw new Error(`Target element not found: '${toSel}'`);
-
-    const { x: fx, y: fy } = fromRes.center;
-    const { x: tx, y: ty } = toRes.center;
-
-    await chrome.scripting.executeScript({ target: { tabId }, func: animateCursorTo, args: [fx, fy, true, 'Dragging element...'] }).catch(() => {});
-
-    const hasDebugger = await ensureDebuggerAttached(tabId);
-    if (hasDebugger) {
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: fx, y: fy, button: 'left', clickCount: 1 });
-      const steps = 6;
-      for (let i = 1; i <= steps; i++) {
-        const mx = Math.round(fx + (tx - fx) * (i / steps));
-        const my = Math.round(fy + (ty - fy) * (i / steps));
-        await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: mx, y: my, button: 'left' });
-        await sleep(30);
-      }
-      await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: tx, y: ty, button: 'left', clickCount: 1 });
-    }
-
-    await chrome.scripting.executeScript({ target: { tabId }, func: animateCursorTo, args: [tx, ty, false, 'Dropped element'] }).catch(() => {});
-    return { action, dragged: true, from: fromSel, to: toSel };
-  }
-
-  // 7. Screenshot with visual indicator suppression
-  if (action === 'screenshot') {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      func: hideAgentIndicatorsForScreenshot,
-    }).catch(() => {});
-
-    let base64Png = '';
-    try {
-      const hasDebugger = await ensureDebuggerAttached(tabId);
-      if (hasDebugger) {
-        try {
-          const shot = await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', { format: 'png' });
-          base64Png = shot.data;
-        } catch {}
-      }
-      if (!base64Png) {
-        const tab = await chrome.tabs.get(tabId);
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-        base64Png = dataUrl.replace(/^data:image\/png;base64,/, '');
-      }
-    } finally {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: showAgentIndicatorsAfterScreenshot,
-      }).catch(() => {});
-    }
-
-    return { action, screenshot: true, pngBase64: base64Png };
-  }
-
-  throw new Error(`Unsupported computer action: '${action}'`);
+  if (acked) await call; // surface CDP errors
 }
 
-// Main RPC Request Dispatcher
+// Dependencies handed to lib/computer.js
+const computerDeps = {
+  async sendCommand(tabId, method, params) {
+    if (!(await ensureDebuggerAttached(tabId))) {
+      throw new ToolError(
+        'debugger_attach_failed',
+        `Could not attach the debugger to tab ${tabId}. Close DevTools on that tab (or any other debugger) and try again.`
+      );
+    }
+    if (method === 'Input.dispatchMouseEvent') return sendMouseEvent(tabId, params);
+    return chrome.debugger.sendCommand({ tabId }, method, params);
+  },
+  async groupTabIds() {
+    await loadMcpGroupId();
+    if (agentGroupId === null) return [];
+    const tabs = await chrome.tabs.query({ groupId: agentGroupId });
+    return tabs.map((t) => t.id).filter((id) => id !== undefined);
+  },
+};
+
+const AGENT_UI_LABEL = 'klik is working here';
+let agentStopped = false;
+
+// Main RPC Request Dispatcher: enforces tab-group confinement for page.* methods and
+// appends tabContext (like Claude in Chrome) to successful page.* results.
 async function handleRequest(msg) {
+  const { id, method, params = {} } = msg;
+  const isPageMethod = typeof method === 'string' && method.startsWith('page.');
+  try {
+    if (isPageMethod) {
+      if (typeof params.tabId !== 'number') {
+        throw new ToolError('missing_tab_id', 'tabId (number) is required. Call tabs_context_mcp first to get valid tab IDs.');
+      }
+      await assertTabInMcpGroup(params.tabId);
+      if (agentStopped) {
+        agentStopped = false;
+        throw new ToolError(
+          'stopped_by_user',
+          'The user pressed Stop in the page. Stop what you are doing, tell the user, and wait for their instructions.'
+        );
+      }
+      ui(params.tabId, 'show', [AGENT_UI_LABEL]); // fire and forget
+    }
+    const res = await handleRequestInner(msg);
+    if (isPageMethod && !res.error && res.result && typeof res.result === 'object' && !Array.isArray(res.result)) {
+      const tabContext = await buildTabContext(params.tabId);
+      if (tabContext) res.result.tabContext = tabContext;
+    }
+    return res;
+  } catch (err) {
+    return {
+      type: 'res',
+      id,
+      error: { code: err.code || 'internal_error', message: err.message || String(err) },
+    };
+  }
+}
+
+async function handleRequestInner(msg) {
   const { id, method, params = {} } = msg;
 
   try {
     switch (method) {
-      // 1. read_page: Returns full ARIA Accessibility Tree + Deterministic Refs
+      // 1. read_page: accessibility tree with stable element refs (ref_N)
       case 'page.readPage': {
         const tabId = params.tabId;
         const tab = await chrome.tabs.get(tabId);
-        if (!tab) return { type: 'res', id, error: { code: 'tab_not_found', message: `Tab ${tabId} not found` } };
         if (isRestrictedUrl(tab.url)) {
-          return { type: 'res', id, error: { code: 'restricted_page', message: `Cannot read restricted page: ${tab.url}` } };
+          throw new ToolError('restricted_page', `Cannot read restricted page: ${tab.url}`);
         }
-
-        // Activate glowing border & status
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          func: setAgentActiveState,
-          args: [true, 'Reading page...'],
-        }).catch(() => {});
-
+        await injectPageTree(tabId);
         const results = await chrome.scripting.executeScript({
           target: { tabId },
-          func: generateAccessibilityTreeFn,
-          args: [params.filter || 'interactive'],
+          injectImmediately: true,
+          func: (filter, depth, maxChars, refId) => {
+            if (typeof window.__klikGenerateTree !== 'function') {
+              throw new Error('Accessibility tree function not found. Please refresh the page.');
+            }
+            return window.__klikGenerateTree(filter, depth, maxChars, refId);
+          },
+          args: [
+            params.filter || null,
+            typeof params.depth === 'number' ? params.depth : null,
+            typeof params.max_chars === 'number' ? params.max_chars : 50000,
+            params.ref_id || null,
+          ],
         });
-
-        const data = results && results[0] ? results[0].result : { elements: '', url: tab.url, title: tab.title };
+        const tree = results && results[0] ? results[0].result : null;
+        if (!tree) throw new ToolError('injected_script_failed', 'Page script returned empty result');
+        if (tree.error) throw new ToolError('ref_stale', tree.error);
         return {
           type: 'res',
           id,
-          result: data,
+          result: { output: `${tree.pageContent}\n\nViewport: ${tree.viewport.width}x${tree.viewport.height}` },
         };
       }
 
@@ -654,254 +552,231 @@ async function handleRequest(msg) {
       case 'page.computer': {
         const tabId = params.tabId;
         const tab = await chrome.tabs.get(tabId);
-        if (!tab) return { type: 'res', id, error: { code: 'tab_not_found', message: `Tab ${tabId} not found` } };
         if (isRestrictedUrl(tab.url)) {
-          return { type: 'res', id, error: { code: 'restricted_page', message: `Cannot interact with restricted page: ${tab.url}` } };
+          throw new ToolError('restricted_page', `Cannot interact with restricted page: ${tab.url}`);
         }
+        const res = await runComputerAction(tabId, params, computerDeps);
+        await recordGifFrame(tabId, { type: params.action, ...pickActionInfo(params) }, params.action === 'screenshot' ? res : null);
+        const { frameWidth, frameHeight, imageWidth, imageHeight, ...clean } = res;
+        return { type: 'res', id, result: clean };
+      }
 
-        const res = await dispatchComputerAction(tabId, params);
+      // 3. form_input: set a control addressed by ref_N
+      case 'page.formInput': {
+        const tabId = params.tabId;
+        if (!params.ref) throw new ToolError('invalid_params', 'ref parameter is required');
+        if (params.value === undefined || params.value === null) throw new ToolError('invalid_params', 'Value parameter is required');
+        await injectPageTree(tabId);
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: formInputInPage,
+          args: [params.ref, params.value],
+        });
+        const res = results && results[0] ? results[0].result : null;
+        if (!res) {
+          throw new ToolError(
+            'injected_script_failed',
+            'the page closed or navigated before the result came back, so the change may or may not have happened. Take a screenshot to check.'
+          );
+        }
+        if (res.error) throw new ToolError(res.errorCode || 'input_invalid', res.error);
+        return { type: 'res', id, result: { output: res.output } };
+      }
+
+      // 4. navigate: URL, back/forward, with "Leave site?" handling
+      case 'page.navigate': {
+        const tabId = params.tabId;
+        const res = await navigateTab(tabId, params, { ensureAttached: ensureDebuggerAttached });
+        await recordGifFrame(tabId, { type: 'navigate', url: params.url }, null);
         return { type: 'res', id, result: res };
       }
 
-      // 3. form_input: Smart input filling, checkbox toggling, select dropdowns
-      case 'page.formInput': {
-        const tabId = params.tabId;
-        const refId = String(params.refId || params.selector || '');
-        const tab = await chrome.tabs.get(tabId);
-        if (!tab) return { type: 'res', id, error: { code: 'tab_not_found', message: `Tab ${tabId} not found` } };
-
-        const formOpts = {};
-        if (params.value !== undefined && params.value !== null) formOpts.value = String(params.value);
-        if (params.checked !== undefined && params.checked !== null) formOpts.checked = Boolean(params.checked);
-
-        const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: findElementInPage,
-          args: [refId, 'form_input', formOpts],
-        });
-
-        const findRes = results && results[0] ? results[0].result : null;
-        if (!findRes || !findRes.found) {
-          return { type: 'res', id, error: { code: 'element_not_found', message: `Form element not found: '${refId}'` } };
-        }
-
-        if (findRes.center) {
-          await chrome.scripting.executeScript({
-            target: { tabId },
-            func: animateCursorTo,
-            args: [findRes.center.x, findRes.center.y, false, `Setting form input ${refId}`],
-          }).catch(() => {});
-        }
-
-        return { type: 'res', id, result: findRes };
-      }
-
-      // 4. navigate: URL navigation, Back, Forward, Reload
-      case 'page.navigate': {
-        const tabId = params.tabId;
-        const action = (params.action || '').toLowerCase();
-        const url = params.url || '';
-
-        if (action === 'back') {
-          await chrome.tabs.goBack(tabId);
-        } else if (action === 'forward') {
-          await chrome.tabs.goForward(tabId);
-        } else if (action === 'reload') {
-          await chrome.tabs.reload(tabId);
-        } else if (url) {
-          const loadPromise = waitForTabLoad(tabId, 25000);
-          await chrome.tabs.update(tabId, { url });
-          await loadPromise;
-        }
-
-        await sleep(150);
-        const updated = await chrome.tabs.get(tabId);
-        return {
-          type: 'res',
-          id,
-          result: { tabId: updated.id, url: updated.url, title: updated.title },
-        };
-      }
-
-      // 5. find: Semantic natural language element search
+      // 5. find: natural-language element search (local matcher, no LLM)
       case 'page.find': {
         const tabId = params.tabId;
-        const query = params.query || '';
+        const query = typeof params.query === 'string' ? params.query.replace(/\s+/g, ' ').trim() : '';
+        if (!query) throw new ToolError('invalid_params', 'Query parameter is required');
+        const tab = await chrome.tabs.get(tabId);
+        if (isRestrictedUrl(tab.url)) throw new ToolError('restricted_page', `Cannot read restricted page: ${tab.url}`);
+        await injectPageTree(tabId);
         const results = await chrome.scripting.executeScript({
           target: { tabId },
-          func: findElementsQueryInPage,
-          args: [query],
+          injectImmediately: true,
+          func: () => {
+            if (typeof window.__klikGenerateTree !== 'function') {
+              throw new Error('Accessibility tree function not found. Please refresh the page.');
+            }
+            return window.__klikGenerateTree('all', null, null, null, { findData: true });
+          },
         });
-        const matches = results && results[0] ? results[0].result : [];
-        return { type: 'res', id, result: { query, matches } };
+        const data = results && results[0] ? results[0].result : null;
+        if (!data) throw new ToolError('find_exception', 'Page script returned empty result');
+        const found = findLocal(data, query);
+        if (found.noMatch) throw new ToolError('find_no_match', found.noMatch);
+        return { type: 'res', id, result: { output: found.output } };
       }
 
-      // 6. read_network_requests: Reads captured network traffic
-      case 'page.readNetworkRequests': {
+      // get_page_text: plain text of the main content
+      case 'page.getPageText': {
         const tabId = params.tabId;
-        const clear = params.clear !== false;
-        const filter = (params.filter || '').toLowerCase();
-        const reqs = networkRequestsByTab.get(tabId) || [];
-        let filtered = [...reqs];
-        if (filter) {
-          filtered = filtered.filter((r) => r.url.toLowerCase().includes(filter));
+        const tab = await chrome.tabs.get(tabId);
+        if (isRestrictedUrl(tab.url)) throw new ToolError('restricted_page', `Cannot read restricted page: ${tab.url}`);
+        const maxChars = typeof params.max_chars === 'number' && params.max_chars > 0 ? params.max_chars : 50000;
+        const results = await chrome.scripting.executeScript({ target: { tabId }, func: extractPageText, args: [maxChars] });
+        const res = results && results[0] ? results[0].result : null;
+        if (!res) {
+          throw new ToolError('get_page_text_no_content', 'No main text content found. The content might be visual content only, or rendered in a canvas element.');
         }
-        if (clear) {
-          networkRequestsByTab.set(tabId, []);
-        }
-        return { type: 'res', id, result: { requests: filtered } };
-      }
-
-      // 7. read_console_messages: Reads captured console messages
-      case 'page.readConsoleMessages': {
-        const tabId = params.tabId;
-        const clear = params.clear !== false;
-        const logs = consoleLogsByTab.get(tabId) || [];
-        const resultLogs = [...logs];
-        if (clear) {
-          consoleLogsByTab.set(tabId, []);
-        }
-        return { type: 'res', id, result: { logs: resultLogs } };
-      }
-
-      // 8. browser_batch: Sequentially executes multiple computer/navigation actions in 1 turn
-      case 'page.browserBatch': {
-        const tabId = params.tabId;
-        const actions = Array.isArray(params.actions) ? params.actions : [];
-        const results = [];
-        for (const act of actions) {
-          const res = await dispatchComputerAction(tabId, act);
-          results.push(res);
-        }
-        return { type: 'res', id, result: { results } };
-      }
-
-      // 9. tabs_context_mcp: Gets tab list, group info, and active tab
-      case 'tabs.context':
-      case 'tabs.list': {
-        const allTabs = await chrome.tabs.query({});
-        const tabs = [];
-        for (const t of allTabs) {
-          if (agentTabIds.has(t.id)) {
-            tabs.push({
-              tabId: t.id,
-              url: t.url || '',
-              title: t.title || '',
-              active: t.active,
-              groupId: t.groupId !== -1 ? t.groupId : null,
-            });
-          }
-        }
-        return { type: 'res', id, result: { tabs, agentGroupId } };
-      }
-
-      // 10. tabs_create_mcp: Creates new managed tab & assigns to Tab Group
-      case 'tabs.create': {
-        const config = await getConfig();
-        const windowId = await getOrCreateWindow(config.windowMode);
-        const createProps = {
-          url: params.url || 'about:blank',
-          active: true,
-        };
-        if (windowId !== undefined) {
-          createProps.windowId = windowId;
-        }
-
-        const tab = await chrome.tabs.create(createProps);
-        agentTabIds.add(tab.id);
-        await ensureAgentTabGroup(tab.id);
-
-        if (params.url && params.url !== 'about:blank') {
-          await waitForTabLoad(tab.id, 30000);
-        }
-
-        const updated = await chrome.tabs.get(tab.id);
+        if (res.error) throw new ToolError('get_page_text_no_content', res.error);
+        const note = res.fellBack
+          ? " (the page's main content element had almost no text, so this is all of <body>. If what you expect is missing, the page may still be loading, or show it in a frame, canvas or video.)"
+          : '';
         return {
           type: 'res',
           id,
-          result: {
-            tabId: updated.id,
-            url: updated.url || '',
-            title: updated.title || '',
-            groupId: agentGroupId,
-          },
+          result: { output: `Title: ${res.title}\nURL: ${res.url}\nSource element: <${res.source}>${note}\n---\n${res.text}` },
         };
       }
 
-      // 11. tabs_close_mcp: Closes a tab
+      // read_network_requests / read_console_messages
+      case 'page.networkRequests': {
+        const tabId = params.tabId;
+        await ensureDebuggerAttached(tabId);
+        if (!enableNetworkTracking(tabId)) await rawSend(tabId, 'Network.enable', {}).catch(() => {});
+        const limit = typeof params.limit === 'number' && params.limit > 0 ? params.limit : 100;
+        const all = getNetworkRequests(tabId);
+        const list = params.urlPattern ? all.filter((r) => r.url.includes(params.urlPattern)) : all;
+        const output = formatNetwork(list, { urlPattern: params.urlPattern, limit });
+        if (params.clear === true) clearNetwork(tabId);
+        return { type: 'res', id, result: { output } };
+      }
+
+      case 'page.consoleMessages': {
+        const tabId = params.tabId;
+        await ensureDebuggerAttached(tabId);
+        const limit = typeof params.limit === 'number' && params.limit > 0 ? params.limit : 100;
+        const onlyErrors = params.onlyErrors === true;
+        let messages;
+        try {
+          messages = getConsoleMessages(tabId, onlyErrors, params.pattern);
+        } catch (err) {
+          throw new ToolError('invalid_params', `Failed to read console messages: ${err.message}`);
+        }
+        const output = formatConsole(messages, { onlyErrors, limit });
+        if (params.clear === true) clearConsole(tabId);
+        return { type: 'res', id, result: { output } };
+      }
+
+      case 'page.javascript': {
+        const res = await runJavascript(params.tabId, params, computerDeps);
+        return { type: 'res', id, result: res };
+      }
+
+      case 'page.resizeWindow': {
+        const res = await resizeWindow(params.tabId, params);
+        return { type: 'res', id, result: res };
+      }
+
+      case 'page.fileUpload': {
+        await injectPageTree(params.tabId);
+        const res = await fileUpload(params.tabId, params);
+        return { type: 'res', id, result: res };
+      }
+
+      case 'page.uploadImage': {
+        await injectPageTree(params.tabId);
+        const res = await uploadImage(params.tabId, params);
+        return { type: 'res', id, result: res };
+      }
+
+      case 'page.gif': {
+        try {
+          const res = await gifAction(params);
+          return { type: 'res', id, result: res };
+        } catch (err) {
+          if (err instanceof ToolError) throw err;
+          throw new Error(`Failed to execute gif_creator: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        }
+      }
+
+      // 9. tabs_context_mcp: MCP tab group context (optionally creating the group)
+      case 'tabs.context': {
+        const ctx = await getOrCreateMcpTabContext({ createIfEmpty: !!params.createIfEmpty });
+        if (!ctx) return { type: 'res', id, result: { exists: false } };
+        return { type: 'res', id, result: { exists: true, ...ctx } };
+      }
+
+      // tabs.list: raw tab lookup used by the daemon for liveness checks
+      case 'tabs.list': {
+        await loadMcpGroupId();
+        const ids = Array.isArray(params.tabIds) ? params.tabIds : null;
+        const all = ids ? (await Promise.all(ids.map((i) => chrome.tabs.get(i).catch(() => null)))).filter(Boolean) : await chrome.tabs.query({});
+        const tabs = all.map((t) => ({
+          ...toTabSummary(t),
+          active: t.active,
+          groupId: t.groupId !== -1 ? t.groupId : null,
+          inMcpGroup: agentGroupId !== null && t.groupId === agentGroupId,
+        }));
+        return { type: 'res', id, result: { tabs, tabGroupId: agentGroupId } };
+      }
+
+      // 10. tabs_create_mcp: new empty tab inside the MCP group
+      case 'tabs.create': {
+        await loadMcpGroupId();
+        if (agentGroupId === null) {
+          throw new ToolError(
+            'tab_create_no_group',
+            `No MCP tab group exists. ${NO_GROUP_NOTE} Use tabs_context_mcp with createIfEmpty: true first to create a group.`
+          );
+        }
+        let windowId;
+        try {
+          ({ windowId } = await chrome.tabGroups.get(agentGroupId));
+        } catch {
+          agentGroupId = null;
+          throw new ToolError(
+            'tab_create_group_gone',
+            'The MCP tab group no longer exists. Its tabs were closed or moved out of the group, and a moved tab may still be open. Call tabs_context_mcp with createIfEmpty: true to create a new group.'
+          );
+        }
+        const tab = await chrome.tabs.create({ windowId, url: 'chrome://newtab', active: false });
+        if (!tab.id) throw new ToolError('tab_create_exception', 'Failed to create tab - no tab ID returned');
+        await chrome.tabs.group({ tabIds: tab.id, groupId: agentGroupId });
+        const availableTabs = await listGroupTabs(agentGroupId);
+        return {
+          type: 'res',
+          id,
+          result: { tabId: tab.id, tabGroupId: agentGroupId, availableTabs },
+        };
+      }
+
+      // 11. tabs_close_mcp: close a tab inside the MCP group
       case 'tabs.close': {
         const tabId = params.tabId;
+        if (typeof tabId !== 'number' || !Number.isInteger(tabId)) {
+          throw new ToolError('tab_close_invalid_params', 'tabId must be an integer');
+        }
+        await loadMcpGroupId();
+        if (agentGroupId === null) {
+          throw new ToolError(
+            'tab_close_no_group',
+            `No MCP tab group exists. ${NO_GROUP_NOTE} This call closed nothing. Call tabs_context_mcp with createIfEmpty: true if you need a working tab.`
+          );
+        }
+        let tab;
         try {
-          await chrome.tabs.remove(tabId);
-        } catch {}
-        agentTabIds.delete(tabId);
+          tab = await chrome.tabs.get(tabId);
+        } catch {
+          throw new ToolError('tab_close_not_found', `Tab ${tabId} does not exist (may have already been closed). Call tabs_context_mcp to see current tabs.`);
+        }
+        if (tab.groupId !== agentGroupId) {
+          throw new ToolError(
+            'tab_close_not_in_group',
+            `Tab ${tabId} is not in this session's tab group. Only tabs visible to this session can be closed. Call tabs_context_mcp to see closable tabs.`
+          );
+        }
+        await chrome.tabs.remove(tabId);
         return { type: 'res', id, result: { closed: true, tabId } };
-      }
-
-      // 12. evaluate: Execute JavaScript in page
-      case 'page.evaluate': {
-        const tabId = params.tabId;
-        const script = params.script || '';
-        const hasDebugger = await ensureDebuggerAttached(tabId);
-        if (hasDebugger) {
-          try {
-            const evalRes = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
-              expression: script,
-              returnByValue: true,
-              awaitPromise: true,
-            });
-            if (evalRes && evalRes.exceptionDetails) {
-              const ex = evalRes.exceptionDetails;
-              const msg = (ex.exception && (ex.exception.description || ex.exception.value)) || ex.text || 'Runtime error';
-              return { type: 'res', id, result: { value: { error: msg } } };
-            }
-            if (evalRes && evalRes.result) {
-              return { type: 'res', id, result: { value: evalRes.result.value } };
-            }
-          } catch (cdpErr) {
-            console.warn('CDP Runtime.evaluate error, trying fallback:', cdpErr);
-          }
-        }
-        const results = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: (codeStr) => {
-            try {
-              return (0, eval)(codeStr);
-            } catch (e) {
-              return { error: e.message || String(e) };
-            }
-          },
-          args: [script],
-        });
-        return {
-          type: 'res',
-          id,
-          result: { value: results && results[0] ? results[0].result : null },
-        };
-      }
-
-      // 13. upload_file: Upload file to input
-      case 'page.uploadFile': {
-        const tabId = params.tabId;
-        const selector = params.selector;
-        const files = params.files || [];
-        const hasDebugger = await ensureDebuggerAttached(tabId);
-        if (!hasDebugger) {
-          return { type: 'res', id, error: { code: 'debugger_unavailable', message: 'Debugger required for file uploads' } };
-        }
-        const doc = await chrome.debugger.sendCommand({ tabId }, 'DOM.getDocument');
-        const search = await chrome.debugger.sendCommand({ tabId }, 'DOM.querySelector', {
-          nodeId: doc.root.nodeId,
-          selector,
-        });
-        if (!search.nodeId) {
-          return { type: 'res', id, error: { code: 'element_not_found', message: `File input element not found: '${selector}'` } };
-        }
-        await chrome.debugger.sendCommand({ tabId }, 'DOM.setFileInputFiles', {
-          files,
-          nodeId: search.nodeId,
-        });
-        return { type: 'res', id, result: { uploaded: true, files } };
       }
 
       case 'ext.reload': {
@@ -920,7 +795,7 @@ async function handleRequest(msg) {
     return {
       type: 'res',
       id,
-      error: { code: 'internal_error', message: err.message || String(err) },
+      error: { code: err.code || 'internal_error', message: err.message || String(err) },
     };
   }
 }
@@ -1070,12 +945,24 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     reconnectDelay = 1000;
     connect();
     sendResponse({ status: 'ok' });
+  } else if (req.type === 'EMERGENCY_STOP') {
+    agentStopped = true;
+    sendResponse({ status: 'ok' });
   } else if (req.type === 'getStatus') {
-    sendResponse({
-      connected: ws && ws.readyState === WebSocket.OPEN,
-      activeTabIds: Array.from(agentTabIds),
-      groupId: agentGroupId,
-    });
+    (async () => {
+      let activeTabIds = [];
+      try {
+        await loadMcpGroupId();
+        if (agentGroupId !== null) {
+          activeTabIds = (await listGroupTabs(agentGroupId)).map((t) => t.tabId);
+        }
+      } catch {}
+      sendResponse({
+        connected: ws && ws.readyState === WebSocket.OPEN,
+        activeTabIds,
+        groupId: agentGroupId,
+      });
+    })();
   }
   return true;
 });

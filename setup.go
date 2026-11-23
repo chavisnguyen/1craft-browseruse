@@ -23,13 +23,13 @@ func extensionSearchPaths() []string {
 		if real, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = real
 		}
-		paths = append(paths, filepath.Join(filepath.Dir(exe), "..", "share", "browseruse", "extension"))
+		paths = append(paths, filepath.Join(filepath.Dir(exe), "..", "share", "klik", "extension"))
 	}
 	paths = append(paths,
-		"/opt/homebrew/share/browseruse/extension",
-		"/opt/homebrew/opt/browseruse/share/browseruse/extension",
-		"/usr/local/share/browseruse/extension",
-		"/home/linuxbrew/.linuxbrew/share/browseruse/extension",
+		"/opt/homebrew/share/klik/extension",
+		"/opt/homebrew/opt/klik/share/klik/extension",
+		"/usr/local/share/klik/extension",
+		"/home/linuxbrew/.linuxbrew/share/klik/extension",
 		"extension",
 	)
 	return paths
@@ -37,7 +37,7 @@ func extensionSearchPaths() []string {
 
 func managedExtensionDir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".1craft-browseruse", "extension")
+	return filepath.Join(home, ".klik", "extension")
 }
 
 func hasManifest(dir string) bool {
@@ -86,7 +86,7 @@ func extensionConfigJSON(token, port string) string {
 // runSetup is the one-command onboarding: token + pre-configured extension copy +
 // MCP registration in every installed agent.
 func runSetup(port string) error {
-	fmt.Printf("🔧 1craft BrowserUse setup (v%s)\n\n", Version)
+	fmt.Printf("🔧 klik setup (v%s)\n\n", Version)
 
 	tok, err := GetOrCreateToken()
 	if err != nil {
@@ -96,7 +96,7 @@ func runSetup(port string) error {
 
 	src := findExtensionSource()
 	if src == "" {
-		return fmt.Errorf("extension folder not found (reinstall with 'brew reinstall browseruse')")
+		return fmt.Errorf("extension folder not found (reinstall with 'brew reinstall klik')")
 	}
 	dst := managedExtensionDir()
 	if err := copyDir(src, dst); err != nil {
@@ -111,7 +111,7 @@ func runSetup(port string) error {
 	exe, _ := os.Executable()
 	cmd := exec.Command("bash", "-s", "sse")
 	cmd.Stdin = strings.NewReader(string(installScript))
-	cmd.Env = append(os.Environ(), "BROWSERUSE_BIN="+exe)
+	cmd.Env = append(os.Environ(), "KLIK_BIN="+exe)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("⚠️  Could not auto-register MCP in your agents (%v).\n   Add this URL manually: http://localhost:%s/mcp\n", err, port)
@@ -129,7 +129,7 @@ func runSetup(port string) error {
 	if resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/mcp", port)); err == nil {
 		_ = resp.Body.Close()
 	} else {
-		fmt.Println("\n⚠️  Daemon is not running yet. Start it with: brew services start browseruse")
+		fmt.Println("\n⚠️  Daemon is not running yet. Start it with: brew services start klik")
 	}
 
 	fmt.Printf(`
@@ -139,7 +139,7 @@ func runSetup(port string) error {
   2. Click 'Load unpacked' and pick:
        %s
   3. Restart your AI agent, then ask it to open a website.
-Problems? Run: browseruse doctor
+Problems? Run: klik doctor
 ========================================================
 `, dst)
 	return nil

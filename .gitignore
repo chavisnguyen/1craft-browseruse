@@ -13,3 +13,4 @@ extension/default_config.json
 bin/
 daemon.pid
 daemon.log
+claude-in-chrome-ref/
