@@ -1,10 +1,10 @@
 {
   "extName": {
-    "message": "1craft BrowserUse",
+    "message": "klik",
     "description": "Extension name"
   },
   "extDesc": {
-    "message": "Control your browser with your AI - Chrome bridge for 1craft BrowserUse MCP daemon",
+    "message": "Control your browser with your AI - Chrome bridge for klik MCP daemon",
     "description": "Extension description"
   },
   "statusConnected": {
@@ -50,13 +50,13 @@
     "message": "Name must be 1-32 chars (alphanumeric, ., _, -)"
   },
   "optionsTitle": {
-    "message": "1craft BrowserUse settings"
+    "message": "klik settings"
   },
   "daemonToken": {
     "message": "Daemon token"
   },
   "daemonTokenHelp": {
-    "message": "64-character hex token from ~/.browseruse/token"
+    "message": "64-character hex token from ~/.klik/token"
   },
   "daemonUrl": {
     "message": "Daemon address"

@@ -1,15 +1,15 @@
 # ========================================================
-# 1craft BrowserUse (Control your browser with your AI)
+# klik (Control your browser with your AI)
 # ========================================================
 
 BIN_DIR := bin
-BIN_NAME := browseruse
+BIN_NAME := klik
 BIN_PATH := $(BIN_DIR)/$(BIN_NAME)
 PID_FILE := daemon.pid
 LOG_FILE := daemon.log
 PORT ?= 3025
 
-.PHONY: all build install install-stdio daemon stop restart status chrome test token clean help setup quickstart doctor
+.PHONY: all build install install-stdio daemon stop restart status test token clean help setup quickstart doctor
 
 all: build
 
@@ -90,14 +90,8 @@ status:
 		echo "🔴 Daemon is NOT running (Run 'make daemon' to start)"; \
 	fi
 	@echo ""
-	@echo "--- Chrome Remote Debugging (Port 9222) ---"
-	@if [ -r "$$HOME/Library/Application Support/Google/Chrome/DevToolsActivePort" ] || curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1; then \
-		echo "🟢 Google Chrome connected on port 9222"; \
-	else \
-		echo "🔴 Chrome port 9222 not active (Run 'make chrome' to attach your real Chrome)"; \
-	fi
 
-## doctor: Chẩn đoán sức khỏe hệ thống (token, daemon, extension folder, CDP)
+## doctor: Chẩn đoán sức khỏe hệ thống (token, daemon, extension folder)
 doctor: build
 	@$(BIN_PATH) doctor
 
@@ -109,14 +103,11 @@ install: build
 install-stdio: build
 	@./install.sh stdio
 
-## chrome: Bật Google Chrome với cổng remote debugging 9222 (giữ login & nhẹ RAM)
-chrome:
-	@./start-chrome.sh
-
 ## test: Chạy kiểm thử tự động
 test: build
 	@echo "🧪 Running integration test..."
 	@go test -v ./...
+	@node --test extension/test
 
 ## clean: Dọn dẹp binary, log và file tạm
 clean: stop
@@ -138,6 +129,5 @@ help:
 	@echo "  make token         - Hiển thị auth token dùng cho Chrome extension"
 	@echo "  make install       - Cài đặt MCP chế độ SSE vào các Agent (mặc định)"
 	@echo "  make install-stdio - Cài đặt MCP chế độ stdio vào các Agent"
-	@echo "  make chrome        - Bật Chrome cổng 9222 để dùng chung"
 	@echo "  make test          - Chạy test kiểm thử"
 	@echo "  make clean         - Dọn dẹp binary và log"

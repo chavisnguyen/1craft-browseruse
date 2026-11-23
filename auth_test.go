@@ -20,7 +20,7 @@ func TestGetOrCreateToken(t *testing.T) {
 	}
 
 	// Verify file permissions
-	tokenPath := filepath.Join(tmpDir, ".browseruse", "token")
+	tokenPath := filepath.Join(tmpDir, ".klik", "token")
 	info, err := os.Stat(tokenPath)
 	if err != nil {
 		t.Fatalf("failed to stat token file: %v", err)
@@ -66,8 +66,8 @@ func TestTokenLegacyMigration(t *testing.T) {
 		t.Errorf("expected legacy token %s, got %s", legacyToken, token)
 	}
 
-	// Verify migrated file in ~/.1craft-browseruse/token exists
-	migratedFile := filepath.Join(tmpDir, ".1craft-browseruse", "token")
+	// Verify migrated file in ~/.klik/token exists
+	migratedFile := filepath.Join(tmpDir, ".klik", "token")
 	data, err := os.ReadFile(migratedFile)
 	if err != nil {
 		t.Fatalf("migrated token file does not exist: %v", err)
@@ -106,12 +106,12 @@ func TestIsOriginAllowed(t *testing.T) {
 		t.Errorf("expected empty origin to be allowed")
 	}
 
-	t.Setenv("BROWSERUSE_ALLOWED_ORIGINS", "")
+	t.Setenv("KLIK_ALLOWED_ORIGINS", "")
 	if IsOriginAllowed("https://evil.com") {
 		t.Errorf("expected evil.com to be disallowed when env is empty")
 	}
 
-	t.Setenv("BROWSERUSE_ALLOWED_ORIGINS", "https://app.example.com,http://localhost:5173")
+	t.Setenv("KLIK_ALLOWED_ORIGINS", "https://app.example.com,http://localhost:5173")
 	if !IsOriginAllowed("https://app.example.com") {
 		t.Errorf("expected app.example.com to be allowed")
 	}

@@ -43,11 +43,11 @@ jobs:
           mkdir -p /tmp/pkg-ext
           cp -r extension /tmp/pkg-ext/extension
           rm -f /tmp/pkg-ext/extension/default_config.json
-          (cd /tmp/pkg-ext && zip -r "$GITHUB_WORKSPACE/1craft-browseruse-extension.zip" extension)
+          (cd /tmp/pkg-ext && zip -r "$GITHUB_WORKSPACE/klik-extension.zip" extension)
       - uses: actions/upload-artifact@v4
         with:
           name: extension-zip
-          path: 1craft-browseruse-extension.zip
+          path: klik-extension.zip
 
   binaries:
     needs: gate
@@ -82,14 +82,14 @@ jobs:
           rm -f /tmp/staging/extension/default_config.json
           
           CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -ldflags="-s -w -X main.Version=${VERSION}" -o /tmp/staging/1craft-browseruse .
+            go build -ldflags="-s -w -X main.Version=${VERSION}" -o /tmp/staging/klik .
             
-          ARCHIVE_NAME="1craft-browseruse-${{ matrix.target }}.tar.gz"
-          tar -czf "$GITHUB_WORKSPACE/$ARCHIVE_NAME" -C /tmp/staging 1craft-browseruse extension
+          ARCHIVE_NAME="klik-${{ matrix.target }}.tar.gz"
+          tar -czf "$GITHUB_WORKSPACE/$ARCHIVE_NAME" -C /tmp/staging klik extension
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: 1craft-browseruse-${{ matrix.target }}.tar.gz
+          path: klik-${{ matrix.target }}.tar.gz
 
   attach:
     needs: [extension-zip, binaries]
@@ -103,14 +103,14 @@ jobs:
       - name: Generate Checksums
         working-directory: release-assets
         run: |
-          sha256sum 1craft-browseruse-*.tar.gz 1craft-browseruse-*.zip > checksums.txt
+          sha256sum klik-*.tar.gz klik-*.zip > checksums.txt
           cat checksums.txt
       - name: Attach assets to Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          gh release view "$TAG" || gh release create "$TAG" --title "1craft BrowserUse $TAG" --notes "Release $TAG"
+          gh release view "$TAG" || gh release create "$TAG" --title "klik $TAG" --notes "Release $TAG"
           gh release upload "$TAG" release-assets/* --clobber
       - uses: actions/upload-artifact@v4
         with:
@@ -131,14 +131,14 @@ jobs:
       - name: Bump Formula
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          ARM64_SHA=$(grep "1craft-browseruse-darwin-arm64.tar.gz" checksums.txt | awk '{print $1}')
-          AMD64_SHA=$(grep "1craft-browseruse-darwin-amd64.tar.gz" checksums.txt | awk '{print $1}')
-          LINUX_SHA=$(grep "1craft-browseruse-linux-amd64.tar.gz" checksums.txt | awk '{print $1}')
+          ARM64_SHA=$(grep "klik-darwin-arm64.tar.gz" checksums.txt | awk '{print $1}')
+          AMD64_SHA=$(grep "klik-darwin-amd64.tar.gz" checksums.txt | awk '{print $1}')
+          LINUX_SHA=$(grep "klik-linux-amd64.tar.gz" checksums.txt | awk '{print $1}')
 
           TAG="$TAG" ARM="$ARM64_SHA" INTEL="$AMD64_SHA" LINUX="$LINUX_SHA" python3 - << 'PYEOF'
           import os, re
 
-          p = "Formula/browseruse.rb"
+          p = "Formula/klik.rb"
           s = open(p).read()
           tag = os.environ["TAG"]
           sums = {
@@ -147,14 +147,14 @@ jobs:
               "linux-amd64": os.environ["LINUX"],
           }
           for plat, sha in sums.items():
-              name = f"1craft-browseruse-{plat}.tar.gz"
-              s = re.sub(r"https://github\.com/chavisnguyen/1craft-browseruse/releases/download/[^/\"']+/" + re.escape(name),
-                         f"https://github.com/chavisnguyen/1craft-browseruse/releases/download/{tag}/{name}", s)
+              name = f"klik-{plat}.tar.gz"
+              s = re.sub(r"https://github\.com/chavisnguyen/klik/releases/download/[^/\"']+/" + re.escape(name),
+                         f"https://github.com/chavisnguyen/klik/releases/download/{tag}/{name}", s)
               s = re.sub(r'(' + re.escape(name) + r'"\n\s*sha256 ")[0-9a-f]{64}', rf"\g<1>{sha}", s)
           open(p, "w").write(s)
           PYEOF
 
           git diff --stat
-          git add Formula/browseruse.rb
-          git -c "user.name=browseruse-bot" -c "user.email=browseruse-bot@users.noreply.github.com" \
+          git add Formula/klik.rb
+          git -c "user.name=klik-bot" -c "user.email=klik-bot@users.noreply.github.com" \
             commit -m "chore(formula): bump to ${TAG}" && git push || echo "nothing to bump"

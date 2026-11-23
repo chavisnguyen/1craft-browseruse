@@ -13,7 +13,8 @@
     "alarms",
     "identity",
     "identity.email",
-    "webNavigation"
+    "webNavigation",
+    "downloads"
   ],
   "host_permissions": [
     "<all_urls>"

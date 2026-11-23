@@ -1,19 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# Install browseruse MCP Server into AGY, OpenCode, Claude Code, Kiro, Codex, and Claude Desktop
+# Install klik MCP Server into AGY, OpenCode, Claude Code, Kiro, Codex, and Claude Desktop
 # Usage:
 #   ./install.sh sse    (Recommended for multiple agents: connects to http://localhost:3025/sse)
 #   ./install.sh stdio  (Standalone mode: spawns binary on demand)
 
 MODE="${1:-sse}"
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-BIN_PATH="${BROWSERUSE_BIN:-$TOOL_DIR/bin/browseruse}"
+BIN_PATH="${KLIK_BIN:-$TOOL_DIR/bin/klik}"
 SSE_URL="http://localhost:3025/mcp"
-SERVER_NAME="1craft-browseruse"
-OLD_NAME="browseruse"
+SERVER_NAME="klik"
+OLD_NAME="klik"
 
-if [ ! -f "$BIN_PATH" ] && [ -z "${BROWSERUSE_BIN:-}" ]; then
+if [ ! -f "$BIN_PATH" ] && [ -z "${KLIK_BIN:-}" ]; then
     echo "⚙️ Building binary first..."
     (cd "$TOOL_DIR" && go build -o "$BIN_PATH" .)
 fi
@@ -342,7 +342,7 @@ print("   ✅ Codex config updated")
 PYEOF
 
 echo ""
-echo "🎉 Done! browseruse configured in [$MODE] mode across your AI tools."
-if [ "$MODE" = "sse" ] && [ -z "${BROWSERUSE_BIN:-}" ]; then
+echo "🎉 Done! klik configured in [$MODE] mode across your AI tools."
+if [ "$MODE" = "sse" ] && [ -z "${KLIK_BIN:-}" ]; then
     echo "💡 Note: To start the background server, run: make daemon"
 fi

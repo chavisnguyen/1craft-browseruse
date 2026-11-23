@@ -56,7 +56,7 @@ jobs:
         run: |
           echo "### 🧪 Go Test Summary" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -E "--- (PASS|FAIL):|ok\s+browseruse|FAIL\s+browseruse" test-output.txt | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+          grep -E "--- (PASS|FAIL):|ok\s+klik|FAIL\s+klik" test-output.txt | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   cross-compile:

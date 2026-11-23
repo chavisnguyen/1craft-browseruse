@@ -1,10 +1,10 @@
 {
   "extName": {
-    "message": "1craft BrowserUse",
+    "message": "klik",
     "description": "Tên tiện ích"
   },
   "extDesc": {
-    "message": "Control your browser with your AI - Cầu nối Chrome cho 1craft BrowserUse MCP daemon",
+    "message": "Control your browser with your AI - Cầu nối Chrome cho klik MCP daemon",
     "description": "Mô tả tiện ích"
   },
   "statusConnected": {
@@ -50,13 +50,13 @@
     "message": "Tên gồm 1-32 ký tự (chữ cái, số, ., _, -)"
   },
   "optionsTitle": {
-    "message": "Cài đặt 1craft BrowserUse"
+    "message": "Cài đặt klik"
   },
   "daemonToken": {
     "message": "Mã xác thực daemon"
   },
   "daemonTokenHelp": {
-    "message": "Mã token gồm 64 ký tự hex từ ~/.browseruse/token"
+    "message": "Mã token gồm 64 ký tự hex từ ~/.klik/token"
   },
   "daemonUrl": {
     "message": "Địa chỉ daemon"
