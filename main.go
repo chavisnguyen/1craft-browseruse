@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	Version       = "3.0.0"
+	Version       = "3.1.0"
 	defaultExtHub = NewExtHub(30 * time.Second)
 	defaultRouter = NewRouter(defaultExtHub)
 )
@@ -72,7 +72,7 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithNumber("tabId", mcp.Required(), mcp.Description("Tab ID to execute the action on. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID.")),
 	)
 	add(computerTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return invokeTool(ctx, req, "page.computer", "action", "coordinate", "text", "duration", "scroll_direction", "scroll_amount", "start_coordinate", "region", "scale", "repeat", "ref", "modifiers")
+		return invokeTool(ctx, req, "page.computer", "action", "coordinate", "text", "duration", "scroll_direction", "scroll_amount", "start_coordinate", "region", "scale", "repeat", "ref", "modifiers", "action_summary")
 	})
 
 	// 3. form_input
@@ -84,7 +84,7 @@ func setupMCPServer() *server.MCPServer {
 		mcp.WithNumber("tabId", mcp.Required(), mcp.Description("Tab ID to set form value in. Must be a tab in the current group. Use tabs_context first if you don't have a valid tab ID.")),
 	)
 	add(formInputTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return invokeTool(ctx, req, "page.formInput", "ref", "value")
+		return invokeTool(ctx, req, "page.formInput", "ref", "value", "action_summary")
 	})
 
 	// 3b. get_page_text
