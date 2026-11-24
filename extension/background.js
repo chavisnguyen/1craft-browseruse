@@ -1,5 +1,5 @@
 import { ToolError } from './lib/errors.js';
-import { runComputerAction, forgetTabContext, captureFrame, frameToViewport, ui } from './lib/computer.js';
+import { runComputerAction, forgetTabContext, captureFrame, frameToViewport, ui, summaryLabel } from './lib/computer.js';
 import { onDebuggerEvent, enableNetworkTracking, forgetTab, getConsoleMessages, clearConsole, getNetworkRequests, clearNetwork, formatConsole, formatNetwork } from './lib/tracker.js';
 import { handleBeforeunloadDialog, navigateTab, runJavascript, resizeWindow, fileUpload, uploadImage } from './lib/page_tools.js';
 import * as gif from './lib/gif.js';
@@ -566,6 +566,9 @@ async function handleRequestInner(msg) {
         const tabId = params.tabId;
         if (!params.ref) throw new ToolError('invalid_params', 'ref parameter is required');
         if (params.value === undefined || params.value === null) throw new ToolError('invalid_params', 'Value parameter is required');
+        if (params.action_summary) {
+          await Promise.race([ui(tabId, 'show', [summaryLabel(params, undefined)]), new Promise((r) => setTimeout(r, 400))]);
+        }
         await injectPageTree(tabId);
         const results = await chrome.scripting.executeScript({
           target: { tabId },

@@ -306,6 +306,12 @@ function mouse(deps, tabId, params) {
   return deps.sendCommand(tabId, 'Input.dispatchMouseEvent', params);
 }
 
+// What the agent says it is doing (action_summary), trimmed for the tag; falls back to a generic label.
+export function summaryLabel(params, fallback) {
+  const t = params && typeof params.action_summary === 'string' ? params.action_summary.trim() : '';
+  return t ? t.slice(0, 120) : fallback;
+}
+
 // Purely cosmetic: never let it block the action (hidden tabs do not run animation frames).
 async function showCursor(tabId, point, isClick, label) {
   await Promise.race([ui(tabId, 'cursor', [point[0], point[1], isClick, label]), sleep(400)]);
@@ -321,7 +327,7 @@ async function doClick(tabId, params, clickCount, deps) {
   // Links that open a new tab: Chrome puts it in the opener's group, so compare the group's
   // tabs before and after the click and tell the agent about any new one.
   const before = new Set(await deps.groupTabIds());
-  await showCursor(tabId, [x, y], true, `Clicking ${target.label}`);
+  await showCursor(tabId, [x, y], true, summaryLabel(params, `Clicking ${target.label}`));
   await mouse(deps, tabId, { type: 'mouseMoved', x, y, button: 'none', buttons: 0, modifiers });
   for (let i = 1; i <= clickCount; i++) {
     await mouse(deps, tabId, { type: 'mousePressed', x, y, button, buttons, clickCount: i, modifiers });
@@ -343,7 +349,7 @@ async function doClick(tabId, params, clickCount, deps) {
 async function doHover(tabId, params, deps) {
   const target = await resolveTarget(tabId, params, 'hover');
   const [x, y] = target.point;
-  await showCursor(tabId, [x, y], false, `Hovering ${target.label}`);
+  await showCursor(tabId, [x, y], false, summaryLabel(params, `Hovering ${target.label}`));
   await mouse(deps, tabId, { type: 'mouseMoved', x, y, button: 'none', buttons: 0, modifiers: 0 });
   return { output: target.atCoordinate ? `Hovered at ${target.label}` : `Hovered over ${target.label}` };
 }
@@ -438,7 +444,7 @@ async function doDrag(tabId, params, deps) {
   const end = requirePoint(params.coordinate, 'coordinate (end position)', 'left_click_drag');
   const [sx, sy] = toViewport(tabId, start, 'left_click_drag');
   const [ex, ey] = toViewport(tabId, end, 'left_click_drag');
-  await showCursor(tabId, [sx, sy], true, 'Dragging...');
+  await showCursor(tabId, [sx, sy], true, summaryLabel(params, 'Dragging...'));
   await mouse(deps, tabId, { type: 'mouseMoved', x: sx, y: sy, button: 'none', buttons: 0, modifiers: 0 });
   await mouse(deps, tabId, { type: 'mousePressed', x: sx, y: sy, button: 'left', buttons: 1, clickCount: 1, modifiers: 0 });
   try {
@@ -456,7 +462,7 @@ async function doDrag(tabId, params, deps) {
   } finally {
     await mouse(deps, tabId, { type: 'mouseReleased', x: ex, y: ey, button: 'left', buttons: 0, clickCount: 1, modifiers: 0 });
   }
-  await showCursor(tabId, [ex, ey], false, 'Dropped');
+  await showCursor(tabId, [ex, ey], false, summaryLabel(params, 'Dropped'));
   return {
     output: `Dragged from (${Math.round(start[0])}, ${Math.round(start[1])}) to (${Math.round(end[0])}, ${Math.round(end[1])})`,
   };
@@ -484,6 +490,10 @@ export async function runComputerAction(tabId, params, deps) {
   const action = params.action;
   if (!COMPUTER_ACTIONS.includes(action)) {
     throw new ToolError('invalid_params', `Unsupported action: ${action}. Supported: ${COMPUTER_ACTIONS.join(', ')}`);
+  }
+  // Show what is about to happen in the tab's tag (type/key have no cursor to carry a label).
+  if (params.action_summary && action !== 'screenshot' && action !== 'zoom') {
+    await Promise.race([ui(tabId, 'show', [summaryLabel(params, undefined)]), sleep(400)]);
   }
   switch (action) {
     case 'left_click':
