@@ -13,20 +13,20 @@ class Klik < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/chavisnguyen/klik/releases/download/v3.0.0/klik-darwin-arm64.tar.gz"
-      sha256 "f8bcae97322d4f5c8110f4db7c66403ef0d471cc7aaf3c3d888dea3f7725f47b"
+      url "https://github.com/chavisnguyen/klik/releases/download/v3.1.0/klik-darwin-arm64.tar.gz"
+      sha256 "d7fedf3dde0a3a351397a34da0ceab496eb8aceb974919cc90d8c209cdeb1868"
     end
     on_intel do
-      url "https://github.com/chavisnguyen/klik/releases/download/v3.0.0/klik-darwin-amd64.tar.gz"
-      sha256 "647f2a4f6293a90680013d68c63a7d5b15813bae37f2c0906833a92dbfc29b97"
+      url "https://github.com/chavisnguyen/klik/releases/download/v3.1.0/klik-darwin-amd64.tar.gz"
+      sha256 "eda5567e94bb1b220fd466b9c2b656546511926d59a811c4e305cfed083612cf"
     end
   end
 
   on_linux do
     # Prebuilt Linux binaries are x86_64 only.
     depends_on arch: :x86_64
-    url "https://github.com/chavisnguyen/klik/releases/download/v3.0.0/klik-linux-amd64.tar.gz"
-    sha256 "c29fdc557fae97d4f555a8e5cdf8f4f048c1da9820f5ce984a8b8cb55770cc0c"
+    url "https://github.com/chavisnguyen/klik/releases/download/v3.1.0/klik-linux-amd64.tar.gz"
+    sha256 "f686fcf1b1cd7e5a79ec89e4b8677360353638d8a9d36e209248e561f3309eb7"
   end
 
   def install
