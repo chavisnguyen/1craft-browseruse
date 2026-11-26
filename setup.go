@@ -1,7 +1,6 @@
 package main
 
 import (
-	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,9 +11,6 @@ import (
 	"time"
 )
 
-//go:embed install.sh
-var installScript []byte
-
 // extensionSearchPaths lists where the bundled Chrome extension may live
 // (Homebrew pkgshare, next to the binary, a source checkout, or the managed copy).
 func extensionSearchPaths() []string {
@@ -23,7 +19,10 @@ func extensionSearchPaths() []string {
 		if real, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = real
 		}
-		paths = append(paths, filepath.Join(filepath.Dir(exe), "..", "share", "klik", "extension"))
+		paths = append(paths,
+			filepath.Join(filepath.Dir(exe), "extension"),
+			filepath.Join(filepath.Dir(exe), "..", "share", "klik", "extension"),
+		)
 	}
 	paths = append(paths,
 		"/opt/homebrew/share/klik/extension",
@@ -83,8 +82,8 @@ func extensionConfigJSON(token, port string) string {
 	return fmt.Sprintf("{\n  \"label\": \"default\",\n  \"token\": %q,\n  \"daemonUrl\": \"ws://127.0.0.1:%s/ext\",\n  \"windowMode\": \"current\"\n}\n", token, port)
 }
 
-// runSetup is the one-command onboarding: token + pre-configured extension copy +
-// MCP registration in every installed agent.
+// runSetup prepares the auth token and the pre-configured Chrome extension copy.
+// Registering MCP into AI coding tools is managed centrally by mcps.
 func runSetup(port string) error {
 	fmt.Printf("🔧 klik setup (v%s)\n\n", Version)
 
@@ -96,7 +95,7 @@ func runSetup(port string) error {
 
 	src := findExtensionSource()
 	if src == "" {
-		return fmt.Errorf("extension folder not found (reinstall with 'brew reinstall klik')")
+		return fmt.Errorf("extension folder not found (reinstall with 'gear install --force klik' or 'brew reinstall klik')")
 	}
 	dst := managedExtensionDir()
 	if err := copyDir(src, dst); err != nil {
@@ -107,15 +106,6 @@ func runSetup(port string) error {
 		return fmt.Errorf("write extension config: %w", err)
 	}
 	fmt.Printf("✅ Extension prepared (auto-connect, no token to paste): %s\n", dst)
-
-	exe, _ := os.Executable()
-	cmd := exec.Command("bash", "-s", "sse")
-	cmd.Stdin = strings.NewReader(string(installScript))
-	cmd.Env = append(os.Environ(), "KLIK_BIN="+exe)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("⚠️  Could not auto-register MCP in your agents (%v).\n   Add this URL manually: http://localhost:%s/mcp\n", err, port)
-	}
 
 	if pb, err := exec.LookPath("pbcopy"); err == nil {
 		c := exec.Command(pb)
@@ -129,18 +119,19 @@ func runSetup(port string) error {
 	if resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%s/mcp", port)); err == nil {
 		_ = resp.Body.Close()
 	} else {
-		fmt.Println("\n⚠️  Daemon is not running yet. Start it with: brew services start klik")
+		fmt.Println("\n⚠️  Daemon is not running yet. Start it with: klik service start (or: brew services start klik)")
 	}
 
 	fmt.Printf(`
 ========================================================
-🎉 Almost done — one manual step (Chrome requires it):
+🎉 Next steps:
   1. Open chrome://extensions and turn on 'Developer mode'
   2. Click 'Load unpacked' and pick:
        %s
-  3. Restart your AI agent, then ask it to open a website.
+  3. Register endpoint http://localhost:%s/mcp via mcps:
+       mcps add klik --url http://localhost:%s/mcp
 Problems? Run: klik doctor
 ========================================================
-`, dst)
+`, dst, port, port)
 	return nil
 }

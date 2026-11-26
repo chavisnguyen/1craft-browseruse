@@ -19,7 +19,6 @@ setup: build
 	printf '{\n  "label": "default",\n  "token": "'$$TOKEN'",\n  "daemonUrl": "ws://127.0.0.1:$(PORT)/ext",\n  "windowMode": "current"\n}\n' > extension/default_config.json
 	@chmod 600 extension/default_config.json
 	@echo "🔑 Đã tự động nhúng token vào extension/default_config.json"
-	@./install.sh
 	@$(MAKE) restart
 	@EXT_PATH="$$(pwd)/extension"; \
 	if command -v pbcopy >/dev/null 2>&1; then \
@@ -94,14 +93,6 @@ status:
 ## doctor: Chẩn đoán sức khỏe hệ thống (token, daemon, extension folder)
 doctor: build
 	@$(BIN_PATH) doctor
-
-## install: Cấu hình MCP chế độ SSE (khuyên dùng cho nhiều Agent)
-install: build
-	@./install.sh sse
-
-## install-stdio: Cấu hình MCP chế độ stdio (đơn lẻ từng Agent)
-install-stdio: build
-	@./install.sh stdio
 
 ## test: Chạy kiểm thử tự động
 test: build

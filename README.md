@@ -15,11 +15,11 @@ You only need [Homebrew](https://brew.sh) and Google Chrome.
 ```bash
 brew tap chavisnguyen/klik https://github.com/chavisnguyen/klik
 brew install klik
-brew services start klik   # runs the background daemon (auto-starts at login)
-klik setup                 # one command: token + extension + register MCP in your agents
+klik service start         # or: brew services start klik
+klik setup                 # prepares auth token + ~/.klik/extension
 ```
 
-`klik setup` registers the MCP server in every agent it finds (Claude Code, Codex, Cursor, Claude Desktop, OpenCode, Kiro, AGY) and prepares the Chrome extension so it connects by itself. Safe to re-run.
+Register `http://localhost:3025/mcp` in your AI coding tools via [`mcps`](https://github.com/chavisnguyen/mcps) (`mcps add klik --url http://localhost:3025/mcp`). Safe to re-run `klik setup` anytime.
 
 ### 2. Load the extension in Chrome (one-time)
 

@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	Version       = "3.1.0"
+	Version       = "3.2.0"
 	defaultExtHub = NewExtHub(30 * time.Second)
 	defaultRouter = NewRouter(defaultExtHub)
 )
@@ -556,6 +556,18 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		action := ""
+		if len(os.Args) > 2 {
+			action = os.Args[2]
+		}
+		if err := runServiceCmd(action, *port); err != nil {
+			fmt.Fprintf(os.Stderr, "Service error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	s := setupMCPServer()
 
 	if !*stdioMode {
@@ -655,7 +667,7 @@ func runDoctor(port string) {
 	resp, err := client.Get(daemonURL)
 	if err != nil {
 		fmt.Printf("🔴 Daemon (: %s): Not reachable (%v)\n", port, err)
-		fmt.Printf("   👉 Run 'brew services start klik' or 'make daemon' to start the server\n")
+		fmt.Printf("   👉 Run 'klik service start' or 'brew services start klik' to start the server\n")
 	} else {
 		_ = resp.Body.Close()
 		fmt.Printf("🟢 Daemon (: %s): Running and reachable at %s\n", port, daemonURL)
@@ -686,13 +698,14 @@ Usage:
   klik [flags]
 
 Commands:
-  setup      One-time setup: token, Chrome extension, register MCP in your agents
+  setup      One-time setup: prepare token & Chrome extension (~/.klik/extension)
+  service    Manage background daemon (start | stop | restart | status | uninstall)
   doctor     Check that everything works and suggest fixes
   version    Print version
   help       Show this help
 
 Common tasks:
-  brew services start klik     Start the background daemon
+  klik service start           Start the background daemon (or: brew services start klik)
   klik -token                  Print the auth token
   klik                         Run the daemon in the foreground (same as -port 3025)
   klik -stdio                  Stdio MCP server (for clients without HTTP support;
